@@ -49,6 +49,10 @@ Standard library changes
 
 #### LinearAlgebra
 
+* `cholesky[!]` now supports `LinearAlgebra.PivotingStrategy` (singleton type) values
+  as its optional `pivot` argument: the default is `cholesky(A, NoPivot())` (vs.
+  `cholesky(A, RowMaximum())`); the former `Val{true/false}`-based calls are deprecated. ([#41640])
+
 #### Markdown
 
 #### Printf
