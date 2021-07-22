@@ -607,7 +607,7 @@ end
 @deprecate cholesky!(A::Diagonal, ::Val{false}; check::Bool = true) cholesky!(A::Diagonal, NoPivot(); check) false
 
 cholesky(A::Diagonal, ::NoPivot = NoPivot(); check::Bool = true) =
-    cholesky!(cholcopy(A), Val(false); check = check)
+    cholesky!(cholcopy(A), NoPivot(); check = check)
 @deprecate cholesky(A::Diagonal, ::Val{false}; check::Bool = true) cholesky(A::Diagonal, NoPivot(); check) false
 
 function getproperty(C::Cholesky{<:Any,<:Diagonal}, d::Symbol)
