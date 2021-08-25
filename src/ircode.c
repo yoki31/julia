@@ -327,6 +327,11 @@ static void jl_encode_value_(jl_ircode_state *s, jl_value_t *v, int as_literal) 
                              jl_is_slot(v) || jl_is_ssavalue(v))) {
             int id = literal_val_id(s, v);
             assert(id >= 0);
+            int newrootsindex = s->method->newrootsindex & INT32_MAX;
+            if (id >= newrootsindex) {
+                write_uint8(s->s, TAG_EXTERN_METHODROOT);
+                id -= newrootsindex;
+            }
             if (id < 256) {
                 write_uint8(s->s, TAG_METHODROOT);
                 write_uint8(s->s, id);
@@ -578,6 +583,18 @@ static jl_value_t *jl_decode_value(jl_ircode_state *s) JL_GC_DISABLED
     case 0:
         tag = read_uint8(s->s);
         return jl_deser_tag(tag);
+    case TAG_EXTERN_METHODROOT:
+        assert(s->method->newrootsindex >= 0);
+        int id;
+        tag = read_uint8(s->s);
+        if (tag == TAG_METHODROOT)
+            id = read_uint8(s->s);
+        else if (tag == TAG_LONG_METHODROOT)
+            id = read_uint16(s->s);
+        else
+            jl_errorf("unexpected tag %d", tag);
+        id += (s->method->newrootsindex & INT32_MAX);
+        return jl_array_ptr_ref(s->method->roots, id);
     case TAG_METHODROOT:
         return jl_array_ptr_ref(s->method->roots, read_uint8(s->s));
     case TAG_LONG_METHODROOT:
