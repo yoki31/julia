@@ -139,11 +139,17 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
     ptrhash_put(&jl_current_modules, (void*)newm, (void*)((uintptr_t)HT_NOTFOUND + 1));
     JL_UNLOCK(&jl_modules_mutex);
 
+    jl_module_t *old_toplevel_module = precompile_toplevel_module;
+
     // copy parent environment info into submodule
     newm->uuid = parent_module->uuid;
     if (jl_is__toplevel__mod(parent_module)) {
         newm->parent = newm;
         jl_register_root_module(newm);
+        if (jl_generating_output()) {
+            assert(old_toplevel_module == NULL);   // cannot support re-entrant precompilation
+            precompile_toplevel_module = newm;
+        }
     }
     else {
         newm->parent = parent_module;
@@ -261,6 +267,8 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
             jl_module_run_initializer(m);
         }
     }
+
+    precompile_toplevel_module = old_toplevel_module;
 
     JL_GC_POP();
     return (jl_value_t*)newm;

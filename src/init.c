@@ -50,6 +50,8 @@ extern BOOL (WINAPI *hSymRefreshModuleList)(HANDLE);
 
 // list of modules being deserialized with __init__ methods
 jl_array_t *jl_module_init_order;
+// currently precompiling toplevel module
+jl_module_t *precompile_toplevel_module = NULL;
 
 size_t jl_page_size;
 
