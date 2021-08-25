@@ -56,6 +56,13 @@ uint32_t jl_module_next_counter(jl_module_t *m)
     return jl_atomic_fetch_add(&m->counter, 1);
 }
 
+jl_module_t *parent_module(jl_module_t *module)
+{
+    while (module != module->parent)
+        module = module->parent;
+    return module;
+}
+
 JL_DLLEXPORT jl_value_t *jl_f_new_module(jl_sym_t *name, uint8_t std_imports, uint8_t using_core)
 {
     // TODO: should we prohibit this during incremental compilation?

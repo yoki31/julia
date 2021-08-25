@@ -575,6 +575,7 @@ jl_function_t *jl_new_generic_function_with_supertype(jl_sym_t *name, jl_module_
 void jl_foreach_reachable_mtable(void (*visit)(jl_methtable_t *mt, void *env), void *env);
 void jl_init_main_module(void);
 int jl_is_submodule(jl_module_t *child, jl_module_t *parent) JL_NOTSAFEPOINT;
+jl_module_t *parent_module(jl_module_t *module);
 jl_array_t *jl_get_loaded_modules(void);
 int jl_datatype_isinlinealloc(jl_datatype_t *ty, int pointerfree);
 
@@ -614,6 +615,7 @@ jl_binding_t *jl_get_module_binding(jl_module_t *m JL_PROPAGATES_ROOT, jl_sym_t 
 void jl_binding_deprecation_warning(jl_module_t *m, jl_binding_t *b);
 extern jl_array_t *jl_module_init_order JL_GLOBALLY_ROOTED;
 extern jl_module_t *precompile_toplevel_module JL_GLOBALLY_ROOTED;
+extern jl_array_t *external_method_instances JL_GLOBALLY_ROOTED;
 extern htable_t jl_current_modules JL_GLOBALLY_ROOTED;
 int jl_compile_extern_c(void *llvmmod, void *params, void *sysimg, jl_value_t *declrt, jl_value_t *sigt);
 

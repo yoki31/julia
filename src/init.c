@@ -52,6 +52,8 @@ extern BOOL (WINAPI *hSymRefreshModuleList)(HANDLE);
 jl_array_t *jl_module_init_order;
 // currently precompiling toplevel module
 jl_module_t *precompile_toplevel_module = NULL;
+// external MethodInstances
+jl_array_t *external_method_instances = NULL;
 
 size_t jl_page_size;
 

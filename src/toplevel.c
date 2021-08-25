@@ -134,7 +134,7 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
 
     jl_module_t *newm = jl_new_module(name);
     jl_value_t *form = (jl_value_t*)newm;
-    JL_GC_PUSH1(&form);
+    JL_GC_PUSH2(&form, &external_method_instances);
     JL_LOCK(&jl_modules_mutex);
     ptrhash_put(&jl_current_modules, (void*)newm, (void*)((uintptr_t)HT_NOTFOUND + 1));
     JL_UNLOCK(&jl_modules_mutex);
@@ -149,6 +149,8 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
         if (jl_generating_output()) {
             assert(old_toplevel_module == NULL);   // cannot support re-entrant precompilation
             precompile_toplevel_module = newm;
+            assert(external_method_instances == NULL);
+            external_method_instances = jl_alloc_array_1d(jl_array_any_type, 0);
         }
     }
     else {
@@ -269,6 +271,7 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
     }
 
     precompile_toplevel_module = old_toplevel_module;
+    external_method_instances = NULL;
 
     JL_GC_POP();
     return (jl_value_t*)newm;
