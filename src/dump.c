@@ -1484,6 +1484,7 @@ static jl_value_t *jl_deserialize_value_method(jl_serializer_state *s, jl_value_
         (jl_method_t*)jl_gc_alloc(s->ptls, sizeof(jl_method_t),
                                   jl_method_type);
     memset(m, 0, sizeof(jl_method_t));
+    m->newrootsindex = INT32_MAX;
     uintptr_t pos = backref_list.len;
     arraylist_push(&backref_list, m);
     m->sig = (jl_value_t*)jl_deserialize_value(s, (jl_value_t**)&m->sig);
