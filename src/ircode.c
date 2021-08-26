@@ -329,6 +329,13 @@ static void jl_encode_value_(jl_ircode_state *s, jl_value_t *v, int as_literal) 
             assert(id >= 0);
             int newrootsindex = s->method->newrootsindex & INT32_MAX;
             if (id >= newrootsindex) {
+                if (s->method->newrootsindex >= 0) {
+                    jl_(precompile_toplevel_module);
+                    jl_(s->method);
+                    jl_(s->method->module);
+                }
+                if (currently_serializing)
+                    assert(s->method->newrootsindex < 0);      // new roots already serialized
                 write_uint8(s->s, TAG_EXTERN_METHODROOT);
                 id -= newrootsindex;
             }
@@ -585,7 +592,13 @@ static jl_value_t *jl_decode_value(jl_ircode_state *s) JL_GC_DISABLED
         return jl_deser_tag(tag);
     case TAG_EXTERN_METHODROOT:
         assert(s->method->newrootsindex >= 0);
+        if (s->method->newrootsindex == INT32_MAX) {
+            jl_(s->method);
+            jl_(s->method->module);
+        }
         assert(s->method->newrootsindex < INT32_MAX);
+        // if (s->method->newrootsindex == INT32_MAX)
+        //     s->method->newrootsindex = jl_array_len(s->method->roots);
         int id;
         tag = read_uint8(s->s);
         if (tag == TAG_METHODROOT)

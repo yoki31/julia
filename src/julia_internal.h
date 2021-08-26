@@ -617,6 +617,7 @@ extern jl_array_t *jl_module_init_order JL_GLOBALLY_ROOTED;
 extern htable_t external_method_instances_by_module JL_GLOBALLY_ROOTED;
 extern jl_module_t *precompile_toplevel_module JL_GLOBALLY_ROOTED;
 extern arraylist_t *external_method_instances JL_GLOBALLY_ROOTED;
+extern int currently_serializing;
 extern htable_t jl_current_modules JL_GLOBALLY_ROOTED;
 int jl_compile_extern_c(void *llvmmod, void *params, void *sysimg, jl_value_t *declrt, jl_value_t *sigt);
 
