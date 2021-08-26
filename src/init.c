@@ -50,10 +50,6 @@ extern BOOL (WINAPI *hSymRefreshModuleList)(HANDLE);
 
 // list of modules being deserialized with __init__ methods
 jl_array_t *jl_module_init_order;
-// currently precompiling toplevel module
-jl_module_t *precompile_toplevel_module = NULL;
-// external MethodInstances
-jl_array_t *external_method_instances = NULL;
 
 size_t jl_page_size;
 
@@ -640,6 +636,12 @@ JL_DLLEXPORT void julia_init(JL_IMAGE_SEARCH rel)
     jl_safepoint_init();
     libsupport_init();
     htable_new(&jl_current_modules, 0);
+    if (jl_generating_output()) {
+        htable_new(&external_method_instances_by_module, 0);
+        precompile_toplevel_module = NULL;
+        external_method_instances = NULL;
+        ptrhash_put(&external_method_instances_by_module, NULL, NULL);
+    }
     JL_MUTEX_INIT(&jl_modules_mutex);
     ios_set_io_wait_func = jl_set_io_wait;
     jl_io_loop = uv_default_loop(); // this loop will internal events (spawning process etc.),

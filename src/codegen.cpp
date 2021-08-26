@@ -7556,10 +7556,11 @@ static std::pair<std::unique_ptr<Module>, jl_llvm_functions_t>
         }
         ctx.roots = NULL;
         if (added && external) {
-            if (m->newrootsindex == INT32_MAX)
+            if (m->newrootsindex == INT32_MAX) {
                 m->newrootsindex = rootslen;
+            }
             assert(external_method_instances != NULL);
-            jl_array_ptr_1d_push(external_method_instances, (jl_value_t*)lam);
+            arraylist_push(external_method_instances, lam);
         }
         JL_UNLOCK(&m->writelock);
     }

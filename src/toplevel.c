@@ -34,6 +34,11 @@ JL_DLLEXPORT const char *jl_filename = "none"; // need to update jl_critical_err
 htable_t jl_current_modules;
 jl_mutex_t jl_modules_mutex;
 
+// When generating output, the following are used for keeping track of external MethodInstances
+htable_t external_method_instances_by_module;      // module => arraylist
+jl_module_t *precompile_toplevel_module;           // the current toplevel module
+arraylist_t *external_method_instances;            // the current toplevel module's list of external MethodInstances
+
 JL_DLLEXPORT void jl_add_standard_imports(jl_module_t *m)
 {
     jl_module_t *base_module = jl_base_relative_to(m);
@@ -134,7 +139,7 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
 
     jl_module_t *newm = jl_new_module(name);
     jl_value_t *form = (jl_value_t*)newm;
-    JL_GC_PUSH2(&form, &external_method_instances);
+    JL_GC_PUSH1(&form);
     JL_LOCK(&jl_modules_mutex);
     ptrhash_put(&jl_current_modules, (void*)newm, (void*)((uintptr_t)HT_NOTFOUND + 1));
     JL_UNLOCK(&jl_modules_mutex);
@@ -147,10 +152,11 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
         newm->parent = newm;
         jl_register_root_module(newm);
         if (jl_generating_output()) {
-            assert(old_toplevel_module == NULL);   // cannot support re-entrant precompilation
             precompile_toplevel_module = newm;
-            assert(external_method_instances == NULL);
-            external_method_instances = jl_alloc_array_1d(jl_array_any_type, 0);
+            arraylist_t ext_mis;
+            arraylist_new(&ext_mis, 0);
+            external_method_instances = &ext_mis;
+            ptrhash_put(&external_method_instances_by_module, newm, external_method_instances);
         }
     }
     else {
@@ -270,8 +276,11 @@ static jl_value_t *jl_eval_module_expr(jl_module_t *parent_module, jl_expr_t *ex
         }
     }
 
-    precompile_toplevel_module = old_toplevel_module;
-    external_method_instances = NULL;
+    if (precompile_toplevel_module != old_toplevel_module) {
+        precompile_toplevel_module = old_toplevel_module;
+        // We can't free the old list of MethodInstances here because it is for consumption by the serializer
+        external_method_instances = (arraylist_t*) ptrhash_get(&external_method_instances_by_module, precompile_toplevel_module);
+    }
 
     JL_GC_POP();
     return (jl_value_t*)newm;
