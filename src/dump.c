@@ -683,6 +683,20 @@ static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v, int as_li
     }
     else if (jl_is_method_instance(v)) {
         jl_method_instance_t *mi = (jl_method_instance_t*)v;
+        // Check whether we need to serialize additional roots of the method
+        if (jl_is_method(mi->def.method)) {
+            jl_method_t *m = mi->def.method;
+            int newrootsindex = m->newrootsindex;
+            if (newrootsindex >= 0 && newrootsindex < INT32_MAX) {
+                assert(!module_in_worklist(m->module));   // this should not be internal
+                write_uint8(s->s, TAG_NEWROOTS);          // the method will be serialized next
+                size_t i, l = jl_array_len(m->roots);
+                write_int32(s->s, l - newrootsindex);
+                for (i = newrootsindex; i < l; i++)
+                    jl_serialize_value(s, (jl_value_t*)jl_array_ptr_ref(m->roots, i));
+                m->newrootsindex ^= (~INT32_MAX);  // flip the sign bit to indicate that the new roots have been serialized
+            }
+        }
         if (jl_is_method(mi->def.value) && mi->def.method->is_for_opaque_closure) {
             jl_error("unimplemented: serialization of MethodInstances for OpaqueClosure");
         }
@@ -1555,7 +1569,7 @@ static jl_value_t *jl_deserialize_value_method(jl_serializer_state *s, jl_value_
     return (jl_value_t*)m;
 }
 
-static jl_value_t *jl_deserialize_value_method_instance(jl_serializer_state *s, jl_value_t **loc) JL_GC_DISABLED
+static jl_value_t *jl_deserialize_value_method_instance(jl_serializer_state *s, jl_value_t **loc, jl_array_t *newroots) JL_GC_DISABLED
 {
     jl_method_instance_t *mi =
         (jl_method_instance_t*)jl_gc_alloc(s->ptls, sizeof(jl_method_instance_t),
@@ -1568,6 +1582,13 @@ static jl_value_t *jl_deserialize_value_method_instance(jl_serializer_state *s, 
     jl_gc_wb(mi, mi->specTypes);
     mi->def.value = jl_deserialize_value(s, &mi->def.value);
     jl_gc_wb(mi, mi->def.value);
+
+    if (newroots != NULL) {
+        jl_method_t *m = mi->def.method;
+        assert(jl_is_method(m));
+        m->newrootsindex = jl_array_len(m->roots);
+        jl_array_ptr_1d_append(m->roots, newroots);
+    }
 
     if (!internal) {
         assert(loc != NULL && loc != HT_NOTFOUND);
@@ -1821,6 +1842,7 @@ static jl_value_t *jl_deserialize_value(jl_serializer_state *s, jl_value_t **loc
     jl_value_t *v;
     size_t n;
     uintptr_t pos;
+    int i, l;
     uint8_t tag = read_uint8(s->s);
     if (tag > LAST_TAG)
         return deser_tag[tag];
@@ -1886,8 +1908,20 @@ static jl_value_t *jl_deserialize_value(jl_serializer_state *s, jl_value_t **loc
         return (jl_value_t*)tv;
     case TAG_METHOD:
         return jl_deserialize_value_method(s, loc);
+    case TAG_NEWROOTS:
+        l = read_int32(s->s);
+        jl_array_t *newroots = jl_alloc_array_1d(jl_array_any_type, l);
+        for (i = 0; i < l; i++) {
+            jl_value_t *newroot = jl_arrayref(newroots, i);
+            jl_arrayset(newroots, jl_deserialize_value(s, &newroot), i);
+        }
+        // We have to feed in the new method roots before the CodeInstances
+        // affiliated with the next MethodInstance are deserialized.
+        tag = read_uint8(s->s);
+        assert(tag == TAG_METHOD_INSTANCE);
+        return jl_deserialize_value_method_instance(s, loc, newroots);
     case TAG_METHOD_INSTANCE:
-        return jl_deserialize_value_method_instance(s, loc);
+        return jl_deserialize_value_method_instance(s, loc, NULL);
     case TAG_CODE_INSTANCE:
         return jl_deserialize_value_code_instance(s, loc);
     case TAG_MODULE:

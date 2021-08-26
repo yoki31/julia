@@ -585,6 +585,7 @@ static jl_value_t *jl_decode_value(jl_ircode_state *s) JL_GC_DISABLED
         return jl_deser_tag(tag);
     case TAG_EXTERN_METHODROOT:
         assert(s->method->newrootsindex >= 0);
+        assert(s->method->newrootsindex < INT32_MAX);
         int id;
         tag = read_uint8(s->s);
         if (tag == TAG_METHODROOT)
