@@ -2349,6 +2349,11 @@ JL_DLLEXPORT int jl_save_incremental(const char *fname, jl_array_t *worklist)
     };
     jl_serialize_value(&s, worklist);
     jl_serialize_value(&s, lambdas);
+    // Cache external MethodInstances
+    len = external_method_instances->len;
+    write_uint64(s.s, len);
+    for (i = 0; i < len; i++)
+        jl_serialize_value(&s, arraylist_pop(external_method_instances));
     jl_serialize_value(&s, edges);
     jl_serialize_value(&s, targets);
     jl_finalize_serializer(&s);
