@@ -47,8 +47,9 @@ A simple struct that captures both the return type (`rt`) and any additional inf
 (`info`) for a given generic call.
 """
 struct CallMeta
-    rt::Any
+    rt::AbstractLattice
     info::Any
+    CallMeta(@nospecialize(rt), @nospecialize(info)) = new(rt::AbstractLattice, info)
 end
 
 """

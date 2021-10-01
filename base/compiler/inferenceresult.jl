@@ -1,6 +1,6 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
-function is_argtype_match(@nospecialize(given_argtype),
+@latticeop args function is_argtype_match(@nospecialize(given_argtype),
                           @nospecialize(cache_argtype),
                           overridden_by_const::Bool)
     if isa(given_argtype, Const) || isa(given_argtype, PartialStruct) || isa(given_argtype, PartialOpaque)
@@ -13,23 +13,23 @@ end
 # for the provided `linfo` and `given_argtypes`. The purpose of this function is
 # to return a valid value for `cache_lookup(linfo, argtypes, cache).argtypes`,
 # so that we can construct cache-correct `InferenceResult`s in the first place.
-function matching_cache_argtypes(linfo::MethodInstance, given_argtypes::Vector, va_override::Bool)
+function matching_cache_argtypes(linfo::MethodInstance, given_argtypes::Vector{AbstractLattice}, va_override::Bool)
     @assert isa(linfo.def, Method) # ensure the next line works
     nargs::Int = linfo.def.nargs
-    given_argtypes = anymap(widenconditional, given_argtypes)
+    given_argtypes = AbstractLattice[widenconditional(a) for a in given_argtypes]
     isva = va_override || linfo.def.isva
-    if isva || isvarargtype(given_argtypes[end])
+    if isva || isvarargtype(unwraptype(given_argtypes[end]))
         isva_given_argtypes = Vector{Any}(undef, nargs)
         for i = 1:(nargs - isva)
             isva_given_argtypes[i] = argtype_by_index(given_argtypes, i)
         end
         if isva
-            if length(given_argtypes) < nargs && isvarargtype(given_argtypes[end])
+            if length(given_argtypes) < nargs && isvarargtype(unwraptype(given_argtypes[end]))
                 last = length(given_argtypes)
             else
                 last = nargs
             end
-            isva_given_argtypes[nargs] = tuple_tfunc(given_argtypes[last:end])
+            isva_given_argtypes[nargs] = TypeLattice(tuple_tfunc(anymap(unwraptype, given_argtypes[last:end])))
         end
         given_argtypes = isva_given_argtypes
     end
@@ -56,7 +56,7 @@ function most_general_argtypes(method::Union{Method, Nothing}, @nospecialize(spe
         # For opaque closure, the closure environment is processed elsewhere
         nargs -= 1
     end
-    cache_argtypes = Vector{Any}(undef, nargs)
+    cache_argtypes = Vector{AbstractLattice}(undef, nargs)
     # First, if we're dealing with a varargs method, then we set the last element of `args`
     # to the appropriate `Tuple` type or `PartialStruct` instance.
     if !toplevel && isva
@@ -93,7 +93,7 @@ function most_general_argtypes(method::Union{Method, Nothing}, @nospecialize(spe
                 vargtype = tuple_tfunc(vargtype_elements)
             end
         end
-        cache_argtypes[nargs] = vargtype
+        cache_argtypes[nargs] = TypeLattice(vargtype)
         nargs -= 1
     end
     # Now, we propagate type info from `linfo_argtypes` into `cache_argtypes`, improving some
@@ -121,10 +121,10 @@ function most_general_argtypes(method::Union{Method, Nothing}, @nospecialize(spe
                 atyp = elim_free_typevars(rewrap(atyp, specTypes))
             end
             i == n && (lastatype = atyp)
-            cache_argtypes[i] = atyp
+            cache_argtypes[i] = TypeLattice(atyp)
         end
         for i = (tail_index + 1):nargs
-            cache_argtypes[i] = lastatype
+            cache_argtypes[i] = TypeLattice(lastatype)
         end
     else
         @assert nargs == 0 "invalid specialization of method" # wrong number of arguments
@@ -152,7 +152,7 @@ function matching_cache_argtypes(linfo::MethodInstance, ::Nothing, va_override::
     return cache_argtypes, falses(length(cache_argtypes))
 end
 
-function cache_lookup(linfo::MethodInstance, given_argtypes::Vector{Any}, cache::Vector{InferenceResult})
+function cache_lookup(linfo::MethodInstance, given_argtypes::Vector{AbstractLattice}, cache::Vector{InferenceResult})
     method = linfo.def::Method
     nargs::Int = method.nargs
     method.isva && (nargs -= 1)
@@ -171,7 +171,7 @@ function cache_lookup(linfo::MethodInstance, given_argtypes::Vector{Any}, cache:
             end
         end
         if method.isva && cache_match
-            cache_match = is_argtype_match(tuple_tfunc(given_argtypes[(nargs + 1):end]),
+            cache_match = is_argtype_match(TypeLattice(tuple_tfunc(anymap(unwraptype, given_argtypes[(nargs + 1):end]))),
                                            cache_argtypes[end],
                                            cache_overridden_by_const[end])
         end

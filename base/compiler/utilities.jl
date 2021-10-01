@@ -228,14 +228,14 @@ end
 
 argextype(@nospecialize(x), state) = argextype(x, state.src, state.sptypes, state.slottypes)
 
-const empty_slottypes = Any[]
+const empty_slottypes = AbstractLattice[]
 
-function argextype(@nospecialize(x), src, sptypes::Vector{Any}, slottypes::Vector{Any} = empty_slottypes)
+@latticeop ret function argextype(@nospecialize(x), src, sptypes::Vector{AbstractLattice}, slottypes::Vector{AbstractLattice} = empty_slottypes)
     if isa(x, Expr)
         if x.head === :static_parameter
             return sptypes[x.args[1]::Int]
         elseif x.head === :boundscheck
-            return Bool
+            return NativeType(Bool)
         elseif x.head === :copyast
             return argextype(x.args[1], src, sptypes, slottypes)
         end
@@ -255,7 +255,7 @@ function argextype(@nospecialize(x), src, sptypes::Vector{Any}, slottypes::Vecto
     elseif isa(x, GlobalRef)
         return abstract_eval_global(x.mod, (x::GlobalRef).name)
     elseif isa(x, PhiNode)
-        return Any
+        return ⊤
     elseif isa(x, PiNode)
         return x.typ
     else
@@ -263,10 +263,12 @@ function argextype(@nospecialize(x), src, sptypes::Vector{Any}, slottypes::Vecto
     end
 end
 
-function singleton_type(@nospecialize(ft))
+@latticeop args function singleton_type(@nospecialize(ft))
     if isa(ft, Const)
         return ft.val
-    elseif isconstType(ft)
+    end
+    ft = unwraptype(ft)
+    if isconstType(ft)
         return ft.parameters[1]
     elseif ft isa DataType && isdefined(ft, :instance)
         return ft.instance

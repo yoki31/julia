@@ -24,13 +24,15 @@ A type that represents the result of running type inference on a chunk of code.
 """
 mutable struct InferenceResult
     linfo::MethodInstance
-    argtypes::Vector{Any}
+    argtypes::Vector{AbstractLattice}
     overridden_by_const::BitVector
     result # ::Type, or InferenceState if WIP
     src #::Union{CodeInfo, OptimizationState, Nothing} # if inferred copy is available
     valid_worlds::WorldRange # if inference and optimization is finished
-    function InferenceResult(linfo::MethodInstance, given_argtypes = nothing, va_override=false)
-        argtypes, overridden_by_const = matching_cache_argtypes(linfo, given_argtypes, va_override)
+    function InferenceResult(linfo::MethodInstance,
+                             argtypes::Union{Nothing,Vector{AbstractLattice}} = nothing,
+                             va_override::Bool = false)
+        argtypes, overridden_by_const = matching_cache_argtypes(linfo, argtypes, va_override)
         return new(linfo, argtypes, overridden_by_const, Any, nothing, WorldRange())
     end
 end
@@ -225,7 +227,7 @@ but `AbstractInterpreter` doesn't provide a specific interface for configuring i
 """
 bail_out_toplevel_call(::AbstractInterpreter, @nospecialize(callsig), sv#=::InferenceState=#) =
     return isa(sv.linfo.def, Module) && !isdispatchtuple(callsig)
-bail_out_call(::AbstractInterpreter, @nospecialize(rt), sv#=::InferenceState=#) =
-    return rt === Any
-bail_out_apply(::AbstractInterpreter, @nospecialize(rt), sv#=::InferenceState=#) =
-    return rt === Any
+@latticeop args bail_out_call(::AbstractInterpreter, @nospecialize(rt), sv#=::InferenceState=#) =
+    return rt === ⊤
+@latticeop args bail_out_apply(::AbstractInterpreter, @nospecialize(rt), sv#=::InferenceState=#) =
+    return rt === ⊤

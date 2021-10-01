@@ -150,7 +150,7 @@ function simple_walk(compact::IncrementalCompact, @nospecialize(defssa#=::AnySSA
 end
 
 function simple_walk_constraint(compact::IncrementalCompact, @nospecialize(defssa#=::AnySSAValue=#),
-                                @nospecialize(typeconstraint) = types(compact)[defssa])
+                                @nospecialize(typeconstraint) = unwraptype(types(compact)[defssa]))
     callback = function (@nospecialize(pi), @nospecialize(idx))
         if isa(pi, PiNode)
             typeconstraint = typeintersect(typeconstraint, widenconst(pi.typ))
@@ -217,7 +217,7 @@ function walk_to_defs(compact::IncrementalCompact, @nospecialize(defssa), @nospe
                             # path, with a different type constraint. We may have
                             # to redo some work here with the wider typeconstraint
                             push!(worklist_defs, new_def)
-                            push!(worklist_constraints, tmerge(new_constraint, visited[new_def]))
+                            push!(worklist_constraints, unwraptype(tmerge(new_constraint, visited[new_def])))
                         end
                         continue
                     end
@@ -436,7 +436,7 @@ function lift_comparison!(compact::IncrementalCompact, idx::Int,
     # Let's check if we evaluate the comparison for each one of the leaves
     lifted_leaves = IdDict{Any, Any}()
     for leaf in leaves
-        r = egal_tfunc(compact_exprtype(compact, leaf), cmp)
+        r = egal_tfunc(unwraptype(compact_exprtype(compact, leaf)), cmp)
         if isa(r, Const)
             lifted_leaves[leaf] = RefValue{Any}(r.val)
         else
@@ -797,7 +797,7 @@ function getfield_elim_pass!(ir::IRCode)
         # Find the type for this allocation
         defexpr = ir[SSAValue(idx)]
         isexpr(defexpr, :new) || continue
-        typ = ir.stmts[idx][:type]
+        typ = widenconst(ir.stmts[idx][:type])
         if isa(typ, UnionAll)
             typ = unwrap_unionall(typ)
         end

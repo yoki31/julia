@@ -29,7 +29,7 @@ struct InliningState{S <: Union{EdgeTracker, Nothing}, T, I<:AbstractInterpreter
 end
 
 function inlining_policy(interp::AbstractInterpreter, @nospecialize(src), stmt_flag::UInt8,
-                         mi::MethodInstance, argtypes::Vector{Any})
+                         mi::MethodInstance, argtypes::Vector{AbstractLattice})
     if isa(src, CodeInfo) || isa(src, Vector{UInt8})
         src_inferred = ccall(:jl_ir_flag_inferred, Bool, (Any,), src)
         src_inlineable = is_stmt_inline(stmt_flag) || ccall(:jl_ir_flag_inlineable, Bool, (Any,), src)
@@ -63,8 +63,8 @@ mutable struct OptimizationState
     ir::Union{Nothing, IRCode}
     stmt_info::Vector{Any}
     mod::Module
-    sptypes::Vector{Any} # static parameters
-    slottypes::Vector{Any}
+    sptypes::Vector{AbstractLattice} # static parameters
+    slottypes::Vector{AbstractLattice}
     const_api::Bool
     inlining::InliningState
     function OptimizationState(frame::InferenceState, params::OptimizationParams, interp::AbstractInterpreter)
@@ -83,14 +83,14 @@ mutable struct OptimizationState
         # if it isn't already
         nssavalues = src.ssavaluetypes
         if nssavalues isa Int
-            src.ssavaluetypes = Any[ Any for i = 1:nssavalues ]
+            src.ssavaluetypes = AbstractLattice[ NativeType(Any) for i = 1:nssavalues ]
         else
-            nssavalues = length(src.ssavaluetypes::Vector{Any})
+            nssavalues = length(src.ssavaluetypes::Vector{AbstractLattice})
         end
         nslots = length(src.slotflags)
         slottypes = src.slottypes
         if slottypes === nothing
-            slottypes = Any[ Any for i = 1:nslots ]
+            slottypes = AbstractLattice[ NativeType(Any) for i = 1:nslots ]
         end
         stmt_info = Any[nothing for i = 1:nssavalues]
         # cache some useful state computations
@@ -285,7 +285,7 @@ function finish(interp::AbstractInterpreter, opt::OptimizationState, params::Opt
         else
             force_noinline = true
         end
-        if !src.inlineable && result === Union{}
+        if !src.inlineable && result === ⊥
             force_noinline = true
         end
     end
@@ -351,7 +351,7 @@ function convert_to_ircode(ci::CodeInfo, code::Vector{Any}, coverage::Bool, sv::
     prevloc = zero(eltype(ci.codelocs))
     stmtinfo = sv.stmt_info
     codelocs = ci.codelocs
-    ssavaluetypes = ci.ssavaluetypes::Vector{Any}
+    ssavaluetypes = ci.ssavaluetypes::Vector{AbstractLattice}
     ssaflags = ci.ssaflags
     while idx <= length(code)
         codeloc = codelocs[idx]
@@ -359,7 +359,7 @@ function convert_to_ircode(ci::CodeInfo, code::Vector{Any}, coverage::Bool, sv::
             # insert a side-effect instruction before the current instruction in the same basic block
             insert!(code, idx, Expr(:code_coverage_effect))
             insert!(codelocs, idx, codeloc)
-            insert!(ssavaluetypes, idx, Nothing)
+            insert!(ssavaluetypes, idx, NativeType(Nothing))
             insert!(stmtinfo, idx, nothing)
             insert!(ssaflags, idx, IR_FLAG_NULL)
             changemap[oldidx] += 1
@@ -369,12 +369,12 @@ function convert_to_ircode(ci::CodeInfo, code::Vector{Any}, coverage::Bool, sv::
             idx += 1
             prevloc = codeloc
         end
-        if code[idx] isa Expr && ssavaluetypes[idx] === Union{}
+        if code[idx] isa Expr && ssavaluetypes[idx] === ⊥
             if !(idx < length(code) && isa(code[idx + 1], ReturnNode) && !isdefined((code[idx + 1]::ReturnNode), :val))
                 # insert unreachable in the same basic block after the current instruction (splitting it)
                 insert!(code, idx + 1, ReturnNode())
                 insert!(codelocs, idx + 1, codelocs[idx])
-                insert!(ssavaluetypes, idx + 1, Union{})
+                insert!(ssavaluetypes, idx + 1, ⊥)
                 insert!(stmtinfo, idx + 1, nothing)
                 insert!(ssaflags, idx + 1, ssaflags[idx])
                 if oldidx < length(changemap)
@@ -395,7 +395,7 @@ function convert_to_ircode(ci::CodeInfo, code::Vector{Any}, coverage::Bool, sv::
     end
     strip_trailing_junk!(ci, code, stmtinfo)
     cfg = compute_basic_blocks(code)
-    types = Any[]
+    types = AbstractLattice[]
     stmts = InstructionStream(code, types, stmtinfo, codelocs, ssaflags)
     ir = IRCode(stmts, cfg, collect(LineInfoNode, ci.linetable::Union{Vector{LineInfoNode},Vector{Any}}), sv.slottypes, meta, sv.sptypes)
     return ir
@@ -445,10 +445,10 @@ intrinsic_effect_free_if_nothrow(f) = f === Intrinsics.pointerref || is_pure_int
 plus_saturate(x::Int, y::Int) = max(x, y, x+y)
 
 # known return type
-isknowntype(@nospecialize T) = (T === Union{}) || isa(T, Const) || isconcretetype(widenconst(T))
+isknowntype(@nospecialize T) = (T === ⊥) || isa(T, Const) || isconcretetype(widenconst(T))
 
-function statement_cost(ex::Expr, line::Int, src::Union{CodeInfo, IRCode}, sptypes::Vector{Any},
-                        slottypes::Vector{Any}, union_penalties::Bool,
+function statement_cost(ex::Expr, line::Int, src::Union{CodeInfo, IRCode}, sptypes::Vector{AbstractLattice},
+                        slottypes::Vector{AbstractLattice}, union_penalties::Bool,
                         params::OptimizationParams, error_path::Bool = false)
     head = ex.head
     if is_meta_expr_head(head)
@@ -456,7 +456,7 @@ function statement_cost(ex::Expr, line::Int, src::Union{CodeInfo, IRCode}, sptyp
     elseif head === :call
         farg = ex.args[1]
         ftyp = argextype(farg, src, sptypes, slottypes)
-        if ftyp === IntrinsicFunction && farg isa SSAValue
+        if unwraptype(ftyp) === IntrinsicFunction && farg isa SSAValue
             # if this comes from code that was already inlined into another function,
             # Consts have been widened. try to recover in simple cases.
             farg = isa(src, CodeInfo) ? src.code[farg.id] : src.stmts[farg.id][:inst]
@@ -491,7 +491,7 @@ function statement_cost(ex::Expr, line::Int, src::Union{CodeInfo, IRCode}, sptyp
                 # If we're in a union context, we penalize type computations
                 # on union types. In such cases, it is usually better to perform
                 # union splitting on the outside.
-                if union_penalties && isa(argextype(ex.args[2],  src, sptypes, slottypes), Union)
+                if union_penalties && isa(unwraptype(argextype(ex.args[2],  src, sptypes, slottypes)), Union)
                     return params.inline_nonleaf_penalty
                 end
             end
@@ -503,8 +503,8 @@ function statement_cost(ex::Expr, line::Int, src::Union{CodeInfo, IRCode}, sptyp
             end
             return T_FFUNC_COST[fidx]
         end
-        extyp = line == -1 ? Any : argextype(SSAValue(line), src, sptypes, slottypes)
-        if extyp === Union{}
+        extyp = line == -1 ? ⊤ : argextype(SSAValue(line), src, sptypes, slottypes)
+        if extyp === ⊥
             return 0
         end
         return error_path ? params.inline_error_path_cost : params.inline_nonleaf_penalty
@@ -514,8 +514,8 @@ function statement_cost(ex::Expr, line::Int, src::Union{CodeInfo, IRCode}, sptyp
         # run-time of the function, we omit them from
         # consideration. This way, non-inlined error branches do not
         # prevent inlining.
-        extyp = line == -1 ? Any : argextype(SSAValue(line), src, sptypes, slottypes)
-        return extyp === Union{} ? 0 : 20
+        extyp = line == -1 ? ⊤ : argextype(SSAValue(line), src, sptypes, slottypes)
+        return extyp === ⊥ ? 0 : 20
     elseif head === :(=)
         if ex.args[1] isa GlobalRef
             cost = 20
@@ -539,8 +539,8 @@ function statement_cost(ex::Expr, line::Int, src::Union{CodeInfo, IRCode}, sptyp
     return 0
 end
 
-function statement_or_branch_cost(@nospecialize(stmt), line::Int, src::Union{CodeInfo, IRCode}, sptypes::Vector{Any},
-                                  slottypes::Vector{Any}, union_penalties::Bool, params::OptimizationParams)
+function statement_or_branch_cost(@nospecialize(stmt), line::Int, src::Union{CodeInfo, IRCode}, sptypes::Vector{AbstractLattice},
+                                  slottypes::Vector{AbstractLattice}, union_penalties::Bool, params::OptimizationParams)
     thiscost = 0
     dst(tgt) = isa(src, IRCode) ? first(src.cfg.blocks[tgt].stmts) : tgt
     if stmt isa Expr
@@ -569,7 +569,7 @@ function inline_worthy(ir::IRCode,
     return true
 end
 
-function statement_costs!(cost::Vector{Int}, body::Vector{Any}, src::Union{CodeInfo, IRCode}, sptypes::Vector{Any}, unionpenalties::Bool, params::OptimizationParams)
+function statement_costs!(cost::Vector{Int}, body::Vector{Any}, src::Union{CodeInfo, IRCode}, sptypes::Vector{AbstractLattice}, unionpenalties::Bool, params::OptimizationParams)
     maxcost = 0
     for line = 1:length(body)
         stmt = body[line]
@@ -584,7 +584,7 @@ function statement_costs!(cost::Vector{Int}, body::Vector{Any}, src::Union{CodeI
     return maxcost
 end
 
-function is_known_call(e::Expr, @nospecialize(func), src, sptypes::Vector{Any}, slottypes::Vector{Any} = empty_slottypes)
+function is_known_call(e::Expr, @nospecialize(func), src, sptypes::Vector{AbstractLattice}, slottypes::Vector{AbstractLattice} = empty_slottypes)
     if e.head !== :call
         return false
     end

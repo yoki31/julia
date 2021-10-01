@@ -32,7 +32,7 @@ function hasuniquerep(@nospecialize t)
     return false
 end
 
-function has_nontrivial_const_info(@nospecialize t)
+#= TODO @latticeop args =# function has_nontrivial_const_info(@nospecialize t)
     isa(t, PartialStruct) && return true
     isa(t, PartialOpaque) && return true
     isa(t, Const) || return false
@@ -40,7 +40,10 @@ function has_nontrivial_const_info(@nospecialize t)
     return !isdefined(typeof(val), :instance) && !(isa(val, Type) && hasuniquerep(val))
 end
 
-has_const_info(@nospecialize x) = (!isa(x, Type) && !isvarargtype(x)) || isType(x)
+@latticeop args function has_const_info(@nospecialize x)
+    x = unwraptype(x)
+    return (!isa(x, Type) && !isvarargtype(x)) || isType(x)
+end
 
 has_concrete_subtype(d::DataType) = d.flags & 0x20 == 0x20
 
@@ -50,7 +53,7 @@ has_concrete_subtype(d::DataType) = d.flags & 0x20 == 0x20
 # certain combinations of `a` and `b` where one/both isa/are `Union`/`UnionAll` type(s)s.
 isnotbrokensubtype(@nospecialize(a), @nospecialize(b)) = (!iskindtype(b) || !isType(a) || hasuniquerep(a.parameters[1]) || b <: a)
 
-argtypes_to_type(argtypes::Array{Any,1}) = Tuple{anymap(@nospecialize(a) -> isvarargtype(a) ? a : widenconst(a), argtypes)...}
+argtypes_to_type(argtypes::Vector{AbstractLattice}) = Tuple{anymap(@nospecialize(a) -> isvarargtype(a) ? a : widenconst(a), argtypes)...}
 
 function isknownlength(t::DataType)
     isvatuple(t) || return true
@@ -165,15 +168,23 @@ function tvar_extent(@nospecialize t)
     return t
 end
 
-_typename(@nospecialize a) = Union{}
-_typename(a::TypeVar) = Core.TypeName
+# N.B.: typename maps type equivalence classes to a single value
+@latticeop args function typename_static(@nospecialize(t))::AbstractLattice
+    t isa Const && return _typename(t.val)
+    t isa Conditional && return NativeType(Bool.name)
+    t = unwrap_unionall(widenconst(t))
+    return isType(t) ? _typename(t.parameters[1]) : NativeType(Core.TypeName)
+end
+
+_typename(@nospecialize a) = ⊥
+_typename(a::TypeVar) = NativeType(Core.TypeName)
 function _typename(a::Union)
     ta = _typename(a.a)
     tb = _typename(a.b)
     ta === tb && return ta # same type-name
-    (ta === Union{} || tb === Union{}) && return Union{} # threw an error
-    (ta isa Const && tb isa Const) && return Union{} # will throw an error (different type-names)
-    return Core.TypeName # uncertain result
+    (ta === ⊥ || tb === ⊥) && return ⊥ # threw an error
+    (ta isa Const && tb isa Const) && return ⊥ # will throw an error (different type-names)
+    return NativeType(Core.TypeName) # uncertain result
 end
 _typename(union::UnionAll) = _typename(union.body)
 _typename(a::DataType) = Const(a.name)
@@ -193,10 +204,11 @@ end
 # or outside of the Tuple/Union nesting, though somewhat more expensive to be
 # outside than inside because the representation is larger (because and it
 # informs the callee whether any splitting is possible).
-function unionsplitcost(atypes::Union{SimpleVector,Vector{Any}})
+function unionsplitcost(atypes::Union{SimpleVector,Vector{AbstractLattice}})
     nu = 1
     max = 2
     for ti in atypes
+        ti = unwraptype(ti)
         if isa(ti, Union)
             nti = unionlen(ti)
             if nti > max
@@ -216,27 +228,40 @@ function switchtupleunion(@nospecialize(ty))
     tparams = (unwrap_unionall(ty)::DataType).parameters
     return _switchtupleunion(Any[tparams...], length(tparams), [], ty)
 end
-
-switchtupleunion(argtypes::Vector{Any}) = _switchtupleunion(argtypes, length(argtypes), [], nothing)
-
 function _switchtupleunion(t::Vector{Any}, i::Int, tunion::Vector{Any}, @nospecialize(origt))
     if i == 0
-        if origt === nothing
-            push!(tunion, copy(t))
-        else
-            tpl = rewrap_unionall(Tuple{t...}, origt)
-            push!(tunion, tpl)
-        end
+        tpl = rewrap_unionall(Tuple{t...}, origt)
+        push!(tunion, tpl)
     else
         ti = t[i]
         if isa(ti, Union)
-            for ty in uniontypes(ti::Union)
+            for ty in uniontypes(ti)
                 t[i] = ty
                 _switchtupleunion(t, i - 1, tunion, origt)
             end
             t[i] = ti
         else
             _switchtupleunion(t, i - 1, tunion, origt)
+        end
+    end
+    return tunion
+end
+
+switchtupleunion(argtypes::Vector{AbstractLattice}) = _switchtupleunion(argtypes, length(argtypes), Vector{AbstractLattice}[])
+function _switchtupleunion(t::Vector{AbstractLattice}, i::Int, tunion::Vector{Vector{AbstractLattice}})
+    if i == 0
+        push!(tunion, copy(t))
+    else
+        ti = t[i]
+        tyi = unwraptype(ti)
+        if isa(tyi, Union)
+            for ty in uniontypes(tyi)
+                t[i] = NativeType(ty)
+                _switchtupleunion(t, i - 1, tunion)
+            end
+            t[i] = ti
+        else
+            _switchtupleunion(t, i - 1, tunion)
         end
     end
     return tunion
@@ -259,7 +284,8 @@ unioncomplexity(u::UnionAll) = max(unioncomplexity(u.body)::Int, unioncomplexity
 unioncomplexity(t::TypeofVararg) = isdefined(t, :T) ? unioncomplexity(t.T)::Int : 0
 unioncomplexity(@nospecialize(x)) = 0
 
-function improvable_via_constant_propagation(@nospecialize(t))
+@latticeop args function improvable_via_constant_propagation(@nospecialize t)
+    t = unwraptype(t)
     if isconcretetype(t) && t <: Tuple
         for p in t.parameters
             p === DataType && return true
