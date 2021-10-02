@@ -305,9 +305,9 @@ namespace llvm {
     void initializeLateLowerGCFramePass(PassRegistry &Registry);
 }
 
-struct LateLowerGCFrame: public FunctionPass, private JuliaPassContext {
+struct LateLowerGCFrameLegacy: public FunctionPass {
     static char ID;
-    LateLowerGCFrame() : FunctionPass(ID)
+    LateLowerGCFrameLegacy() : FunctionPass(ID)
     {
         llvm::initializeDominatorTreeWrapperPassPass(*PassRegistry::getPassRegistry());
     }
@@ -319,6 +319,17 @@ protected:
         AU.addPreserved<DominatorTreeWrapperPass>();
         AU.setPreservesCFG();
     }
+
+private:
+    bool runOnFunction(Function &F) override;
+};
+
+struct LateLowerGCFrame:  private JuliaPassContext {
+    function_ref<DominatorTree &()> GetDT;
+    LateLowerGCFrame(function_ref<DominatorTree &()> GetDT) : GetDT(GetDT) {}
+
+public:
+    bool runOnFunction(Function &F);
 
 private:
     CallInst *pgcstack;
@@ -350,8 +361,6 @@ private:
     void PlaceGCFrameStore(State &S, unsigned R, unsigned MinColorRoot, const std::vector<int> &Colors, Value *GCFrame, Instruction *InsertBefore);
     void PlaceGCFrameStores(State &S, unsigned MinColorRoot, const std::vector<int> &Colors, Value *GCFrame);
     void PlaceRootsAndUpdateCalls(std::vector<int> &Colors, State &S, std::map<Value *, std::pair<int, int>>);
-    bool doInitialization(Module &M) override;
-    bool runOnFunction(Function &F) override;
     bool CleanupIR(Function &F, State *S=nullptr);
     void NoteUseChain(State &S, BBState &BBS, User *TheUser);
     SmallVector<int, 1> GetPHIRefinements(PHINode *phi, State &S);
@@ -1388,7 +1397,7 @@ void LateLowerGCFrame::FixUpRefinements(ArrayRef<int> PHINumbers, State &S)
             j++;
             if (auto inst = dyn_cast<Instruction>(S.ReversePtrNumbering[refine])) {
                 if (!S.DT)
-                    S.DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+                    S.DT = &GetDT();
                 if (S.DT->dominates(inst, Phi))
                     continue;
                 // Decrement `j` so we'll overwrite/ignore it.
@@ -2000,7 +2009,7 @@ void LateLowerGCFrame::ComputeLiveSets(State &S) {
         // add in any extra live values.
         if (!S.GCPreserves.empty()) {
             if (!S.DT) {
-                S.DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+                S.DT = &GetDT();
             }
             for (auto it2 : S.GCPreserves) {
                 if (!S.DT->dominates(it2.first, Safepoint))
@@ -2658,16 +2667,9 @@ void LateLowerGCFrame::PlaceRootsAndUpdateCalls(std::vector<int> &Colors, State 
     }
 }
 
-bool LateLowerGCFrame::doInitialization(Module &M) {
-    // Initialize platform-agnostic references.
-    initAll(M);
-    return true;
-}
-
 bool LateLowerGCFrame::runOnFunction(Function &F) {
+    initAll(*F.getParent());
     LLVM_DEBUG(dbgs() << "GC ROOT PLACEMENT: Processing function " << F.getName() << "\n");
-    // Check availability of functions again since they might have been deleted.
-    initFunctions(*F.getParent());
     if (!pgcstack_getter)
         return CleanupIR(F);
 
@@ -2684,11 +2686,19 @@ bool LateLowerGCFrame::runOnFunction(Function &F) {
     return true;
 }
 
-char LateLowerGCFrame::ID = 0;
-static RegisterPass<LateLowerGCFrame> X("LateLowerGCFrame", "Late Lower GCFrame Pass", false, false);
+bool LateLowerGCFrameLegacy::runOnFunction(Function &F) {
+    auto GetDT = [this]() -> DominatorTree & {
+        return getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+    };
+    auto lateLowerGCFrame = LateLowerGCFrame(GetDT);
+    return lateLowerGCFrame.runOnFunction(F);
+}
+
+char LateLowerGCFrameLegacy::ID = 0;
+static RegisterPass<LateLowerGCFrameLegacy> X("LateLowerGCFrame", "Late Lower GCFrame Pass", false, false);
 
 Pass *createLateLowerGCFramePass() {
-    return new LateLowerGCFrame();
+    return new LateLowerGCFrameLegacy();
 }
 
 extern "C" JL_DLLEXPORT void LLVMExtraAddLateLowerGCFramePass(LLVMPassManagerRef PM)
