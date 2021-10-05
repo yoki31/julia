@@ -18,7 +18,7 @@ JL_DLLEXPORT void jl_write_malloc_log_fallback(void) UNAVAILABLE
 JL_DLLEXPORT void jl_write_coverage_data_fallback(const char *output) UNAVAILABLE
 
 JL_DLLEXPORT void jl_clear_malloc_data_fallback(void) UNAVAILABLE
-JL_DLLEXPORT int jl_extern_c_fallback(jl_function_t *f, jl_value_t *rt, jl_value_t *argt, char *name) UNAVAILABLE
+JL_DLLEXPORT void jl_extern_c_fallback(jl_function_t *f, jl_value_t *rt, jl_value_t *argt, char *name) UNAVAILABLE
 JL_DLLEXPORT jl_value_t *jl_dump_method_asm_fallback(jl_method_instance_t *linfo, size_t world,
         char raw_mc, char getwrapper, const char* asm_variant, const char *debuginfo, char binary) UNAVAILABLE
 JL_DLLEXPORT jl_value_t *jl_dump_function_ir_fallback(void *f, char strip_ir_metadata, char dump_module, const char *debuginfo) UNAVAILABLE
