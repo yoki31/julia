@@ -28,8 +28,8 @@ function try_compute_field_stmt(compact::IncrementalCompact, stmt::Expr)
     # try to resolve other constants, e.g. global reference
     else
         field = compact_exprtype(compact, field)
-        if isa(field, Const)
-            field = field.val
+        if isConst(field)
+            field = constant(field)
         else
             return nothing
         end
@@ -271,8 +271,8 @@ function is_getfield_captures(@nospecialize(def), compact::IncrementalCompact)
     length(def.args) >= 3 || return false
     is_known_call(def, getfield, compact) || return false
     which = compact_exprtype(compact, def.args[3])
-    isa(which, Const) || return false
-    which.val === :captures || return false
+    isConst(which) || return false
+    constant(which) === :captures || return false
     oc = compact_exprtype(compact, def.args[2])
     return oc ⊑ Core.OpaqueClosure
 end
@@ -377,7 +377,7 @@ function lift_leaves(compact::IncrementalCompact,
                 return nothing
             else
                 typ = compact_exprtype(compact, leaf)
-                if !isa(typ, Const)
+                if !isConst(typ)
                     # TODO: (disabled since #27126)
                     # If the leaf is an old ssa value, insert a getfield here
                     # We will revisit this getfield later when compaction gets
@@ -387,7 +387,7 @@ function lift_leaves(compact::IncrementalCompact,
                     # of where we are
                     return nothing
                 end
-                leaf = typ.val
+                leaf = constant(typ)
                 # Fall through to below
             end
         elseif isa(leaf, QuoteNode)
@@ -411,17 +411,16 @@ function lift_leaves(compact::IncrementalCompact,
     return lifted_leaves, maybe_undef
 end
 
-make_MaybeUndef(@nospecialize(typ)) = isa(typ, MaybeUndef) ? typ : MaybeUndef(typ)
-
 function lift_comparison!(compact::IncrementalCompact, idx::Int,
         @nospecialize(c1), @nospecialize(c2), stmt::Expr,
         lifting_cache::IdDict{Pair{AnySSAValue, Any}, AnySSAValue})
-    if isa(c1, Const)
+    if isConst(c1)
         cmp = c1
         typeconstraint = widenconst(c2)
         val = stmt.args[3]
     else
-        cmp = c2::Const
+        @assert isConst(c2)
+        cmp = c2
         typeconstraint = widenconst(c1)
         val = stmt.args[2]
     end
@@ -437,8 +436,8 @@ function lift_comparison!(compact::IncrementalCompact, idx::Int,
     lifted_leaves = IdDict{Any, Any}()
     for leaf in leaves
         r = egal_tfunc(unwraptype(compact_exprtype(compact, leaf)), cmp)
-        if isa(r, Const)
-            lifted_leaves[leaf] = RefValue{Any}(r.val)
+        if isConst(r)
+            lifted_leaves[leaf] = RefValue{Any}(constant(r))
         else
             # TODO: In some cases it might be profitable to hoist the ===
             # here.
@@ -619,10 +618,10 @@ function getfield_elim_pass!(ir::IRCode)
         elseif is_known_call(stmt, (===), compact) && length(stmt.args) == 3
             c1 = compact_exprtype(compact, stmt.args[2])
             c2 = compact_exprtype(compact, stmt.args[3])
-            if !(isa(c1, Const) || isa(c2, Const))
+            if !(isConst(c1) || isConst(c2))
                 continue
             end
-            (isa(c1, Const) && isa(c2, Const)) && continue
+            (isConst(c1) && isConst(c2)) && continue
             lift_comparison!(compact, idx, c1, c2, stmt, lifting_cache)
             continue
         elseif isexpr(stmt, :foreigncall)
@@ -683,7 +682,7 @@ function getfield_elim_pass!(ir::IRCode)
         isa(struct_typ, DataType) || continue
 
         struct_typ.name.atomicfields == C_NULL || continue # TODO: handle more
-        if !(field_ordering === :unspecified || (field_ordering isa Const && field_ordering.val === :not_atomic))
+        if !(field_ordering === :unspecified || (isConst(field_ordering) && constant(field_ordering) === :not_atomic))
             continue
         end
 
@@ -731,7 +730,7 @@ function getfield_elim_pass!(ir::IRCode)
         lifted_leaves, any_undef = r
 
         if any_undef
-            result_t = make_MaybeUndef(result_t)
+            result_t = MaybeUndef(result_t)
         end
 
 #        @Base.show result_t
@@ -1063,7 +1062,7 @@ function type_lift_pass!(ir::IRCode)
                         else
                             up_id = id = (def.values[i]::SSAValue).id
                             @label restart
-                            if !isa(ir.stmts[id][:type], MaybeUndef)
+                            if !isMaybeUndef(ir.stmts[id][:type])
                                 val = true
                             else
                                 node = insts[id][:inst]

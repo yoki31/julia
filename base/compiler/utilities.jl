@@ -228,9 +228,7 @@ end
 
 argextype(@nospecialize(x), state) = argextype(x, state.src, state.sptypes, state.slottypes)
 
-const empty_slottypes = AbstractLattice[]
-
-@latticeop ret function argextype(@nospecialize(x), src, sptypes::Vector{AbstractLattice}, slottypes::Vector{AbstractLattice} = empty_slottypes)
+function argextype(@nospecialize(x), src, sptypes::Argtypes, slottypes::Argtypes = EMPTY_SLOTTYPES)
     if isa(x, Expr)
         if x.head === :static_parameter
             return sptypes[x.args[1]::Int]
@@ -251,7 +249,7 @@ const empty_slottypes = AbstractLattice[]
             isa(src, IRCode) ? src.argtypes[x.n] :
             slottypes[x.n]
     elseif isa(x, QuoteNode)
-        return Const((x::QuoteNode).value)
+        return Const(x.value)
     elseif isa(x, GlobalRef)
         return abstract_eval_global(x.mod, (x::GlobalRef).name)
     elseif isa(x, PhiNode)
@@ -263,9 +261,9 @@ const empty_slottypes = AbstractLattice[]
     end
 end
 
-@latticeop args function singleton_type(@nospecialize(ft))
-    if isa(ft, Const)
-        return ft.val
+function singleton_type(ft::LatticeElement)
+    if isConst(ft)
+        return constant(ft)
     end
     ft = unwraptype(ft)
     if isconstType(ft)
@@ -328,7 +326,7 @@ function is_throw_call(e::Expr)
         f = e.args[1]
         if isa(f, GlobalRef)
             ff = abstract_eval_global(f.mod, f.name)
-            if isa(ff, Const) && ff.val === Core.throw
+            if isConst(ff) && constant(ff) === Core.throw
                 return true
             end
         end

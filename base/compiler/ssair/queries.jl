@@ -3,7 +3,7 @@
 """
 Determine whether a statement is side-effect-free, i.e. may be removed if it has no uses.
 """
-function stmt_effect_free(@nospecialize(stmt), @nospecialize(rt), src, sptypes::Vector{AbstractLattice})
+function stmt_effect_free(@nospecialize(stmt), @nospecialize(rt), src, sptypes::Argtypes)
     isa(stmt, PiNode) && return true
     isa(stmt, PhiNode) && return true
     isa(stmt, ReturnNode) && return false
@@ -17,7 +17,7 @@ function stmt_effect_free(@nospecialize(stmt), @nospecialize(rt), src, sptypes::
         if head === :static_parameter
             etyp = sptypes[e.args[1]]
             # if we aren't certain enough about the type, it might be an UndefVarError at runtime
-            return isa(etyp, Const)
+            return isConst(etyp)
         end
         ea = e.args
         if head === :call
@@ -28,12 +28,12 @@ function stmt_effect_free(@nospecialize(stmt), @nospecialize(rt), src, sptypes::
             if isa(f, IntrinsicFunction)
                 intrinsic_effect_free_if_nothrow(f) || return false
                 return intrinsic_nothrow(f,
-                        AbstractLattice[argextype(ea[i], src, sptypes) for i = 2:length(ea)])
+                        LatticeElement[argextype(ea[i], src, sptypes) for i = 2:length(ea)])
             end
             contains_is(_PURE_BUILTINS, f) && return true
             contains_is(_PURE_OR_ERROR_BUILTINS, f) || return false
             rt === ⊥ && return false
-            return _builtin_nothrow(f, AbstractLattice[argextype(ea[i], src, sptypes) for i = 2:length(ea)], rt)
+            return _builtin_nothrow(f, LatticeElement[argextype(ea[i], src, sptypes) for i = 2:length(ea)], rt)
         elseif head === :new
             a = ea[1]
             typ = argextype(a, src, sptypes)
@@ -74,15 +74,15 @@ function stmt_effect_free(@nospecialize(stmt), @nospecialize(rt), src, sptypes::
     return true
 end
 
-@latticeop ret function abstract_eval_ssavalue(s::SSAValue, src::IRCode)
+function abstract_eval_ssavalue(s::SSAValue, src::IRCode)
     return types(src)[s]
 end
 
-@latticeop ret function abstract_eval_ssavalue(s::SSAValue, src::IncrementalCompact)
+function abstract_eval_ssavalue(s::SSAValue, src::IncrementalCompact)
     return types(src)[s]
 end
 
-@latticeop ret function compact_exprtype(compact::IncrementalCompact, @nospecialize(value))
+function compact_exprtype(compact::IncrementalCompact, @nospecialize(value))
     if isa(value, AnySSAValue)
         return types(compact)[value]
     elseif isa(value, Argument)
@@ -90,7 +90,7 @@ end
     end
     return argextype(value, compact.ir, compact.ir.sptypes)
 end
-@latticeop ret argextype(@nospecialize(value), compact::IncrementalCompact, sptypes::Vector{AbstractLattice}) = compact_exprtype(compact, value)
+argextype(@nospecialize(value), compact::IncrementalCompact, sptypes::Argtypes) = compact_exprtype(compact, value)
 
 is_tuple_call(ir::IRCode, @nospecialize(def)) = isa(def, Expr) && is_known_call(def, tuple, ir, ir.sptypes)
 is_tuple_call(compact::IncrementalCompact, @nospecialize(def)) = isa(def, Expr) && is_known_call(def, tuple, compact)

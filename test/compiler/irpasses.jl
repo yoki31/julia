@@ -179,8 +179,8 @@ let m = Meta.@lower 1 + 1
     src.codelocs = fill(Int32(1), nstmts)
     src.ssaflags = fill(Int32(0), nstmts)
     ir = Core.Compiler.inflate_ir(src,
-        Core.Compiler.AbstractLattice[],
-        Core.Compiler.AbstractLattice[Core.Compiler.NativeType(Any), Core.Compiler.NativeType(Any)])
+        Core.Compiler.Argtypes(),
+        Core.Compiler.LatticeElement[Core.Compiler.NativeType(Any), Core.Compiler.NativeType(Any)])
     @test Core.Compiler.verify_ir(ir) === nothing
     ir = @test_nowarn Core.Compiler.getfield_elim_pass!(ir)
     @test Core.Compiler.verify_ir(ir) === nothing
@@ -402,7 +402,7 @@ let # `getfield_elim_pass!` should work with constant globals
     end
     @test !any(src.code) do @nospecialize(stmt)
         Meta.isexpr(stmt, :call) || return false
-        ft = Core.Compiler.argextype(stmt.args[1], src, Core.Compiler.AbstractLattice[], src.slottypes)
+        ft = Core.Compiler.argextype(stmt.args[1], src, Core.Compiler.Argtypes(), src.slottypes)
         return Core.Compiler.widenconst(ft) == Core.Compiler.NativeType(typeof(getfield))
     end
     @test !any(src.code) do @nospecialize(stmt)
@@ -420,7 +420,7 @@ let # `getfield_elim_pass!` should work with constant globals
     end
     @test !any(src.code) do @nospecialize(stmt)
         Meta.isexpr(stmt, :call) || return false
-        ft = Core.Compiler.argextype(stmt.args[1], src, Core.Compiler.AbstractLattice[], src.slottypes)
+        ft = Core.Compiler.argextype(stmt.args[1], src, Core.Compiler.Argtypes(), src.slottypes)
         return Core.Compiler.widenconst(ft) == Core.Compiler.NativeType(typeof(getfield))
     end
     @test !any(src.code) do @nospecialize(stmt)
