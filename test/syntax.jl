@@ -3000,3 +3000,20 @@ end
     @test_throws ParseError Meta.parse("[;; ;]")
     @test_throws ParseError Meta.parse("[;\n;]")
 end
+
+# issue #19012
+@test Meta.parse("\U2200", raise=false) == Symbol("∀")
+@test Meta.parse("\U2203", raise=false) == Symbol("∃")
+@test Meta.parse("a\U2203", raise=false) == Symbol("a∃")
+@test Meta.parse("\U2204", raise=false) == Symbol("∄")
+
+# issue 42220
+macro m42220()
+    return quote
+        function foo(::Type{T}=Float64) where {T}
+            return Vector{T}(undef, 10)
+        end
+    end
+end
+@test @m42220()() isa Vector{Float64}
+@test @m42220()(Bool) isa Vector{Bool}

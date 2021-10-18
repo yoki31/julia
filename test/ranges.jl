@@ -417,6 +417,9 @@ end
         @test intersect(1:3, 2) === intersect(2, 1:3) === 2:2
         @test intersect(1.0:3.0, 2) == intersect(2, 1.0:3.0) == [2.0]
 
+        @test intersect(1:typemax(Int), [1, 3]) == [1, 3]
+        @test intersect([1, 3], 1:typemax(Int)) == [1, 3]
+
         @testset "Support StepRange with a non-numeric step" begin
             start = Date(1914, 7, 28)
             stop = Date(1918, 11, 11)
@@ -425,6 +428,21 @@ end
             @test intersect(start:Day(1):stop, start:Day(5):stop) == start:Day(5):stop
             @test intersect(start-Day(10):Day(1):stop-Day(10), start:Day(5):stop) ==
                 start:Day(5):stop-Day(10)-mod(stop-start, Day(5))
+        end
+
+        @testset "Two AbstractRanges" begin
+            struct DummyRange{T} <: AbstractRange{T}
+                r
+            end
+            Base.iterate(dr::DummyRange) = iterate(dr.r)
+            Base.iterate(dr::DummyRange, state) = iterate(dr.r, state)
+            Base.length(dr::DummyRange) = length(dr.r)
+            Base.in(x::Int, dr::DummyRange) = in(x, dr.r)
+            Base.unique(dr::DummyRange) = unique(dr.r)
+            r1 = DummyRange{Int}([1, 2, 3, 3, 4, 5])
+            r2 = DummyRange{Int}([3, 3, 4, 5, 6])
+            @test intersect(r1, r2) == [3, 4, 5]
+            @test intersect(r2, r1) == [3, 4, 5]
         end
     end
     @testset "issubset" begin
@@ -669,14 +687,14 @@ end
 end
 @testset "broadcasted operations with scalars" for T in (Int, UInt, Int128)
     @test broadcast(-, T(1):3, 2) === T(1)-2:1
-    @test broadcast(-, T(1):3, 0.25) === T(1)-0.25:3-0.25
+    @test broadcast(-, T(1):3, 0.25) === range(T(1)-0.25, length=T(3)) == T(1)-0.25:3-0.25
     @test broadcast(+, T(1):3) === T(1):3
     @test broadcast(+, T(1):3, 2) === T(3):5
-    @test broadcast(+, T(1):3, 0.25) === T(1)+0.25:3+0.25
+    @test broadcast(+, T(1):3, 0.25) === range(T(1)+0.25, length=T(3)) == T(1)+0.25:3+0.25
     @test broadcast(+, T(1):2:6, 1) === T(2):2:6
-    @test broadcast(+, T(1):2:6, 0.3) === T(1)+0.3:2:5+0.3
+    @test broadcast(+, T(1):2:6, 0.3) === range(T(1)+0.3, step=2, length=T(3)) == T(1)+0.3:2:5+0.3
     @test broadcast(-, T(1):2:6, 1) === T(0):2:4
-    @test broadcast(-, T(1):2:6, 0.3) === T(1)-0.3:2:5-0.3
+    @test broadcast(-, T(1):2:6, 0.3) === range(T(1)-0.3, step=2, length=T(3)) == T(1)-0.3:2:5-0.3
     is_unsigned = T <: Unsigned
     is_unsigned && @test length(broadcast(-, T(1):3, 2)) === length(T(1)-2:T(3)-2)
     @test broadcast(-, T(1):3) == -T(1):-T(1):-T(3)
@@ -1516,6 +1534,11 @@ end
     @test @inferred(x .\ r) === 0.5:0.5:2.5
 
     @test @inferred(2 .* (r .+ 1) .+ 2) == 6:2:14
+
+    # issue #42291
+    @test length((1:5) .- 1/7) == 5
+    @test length((1:5) .+ -1/7) == 5
+    @test length(-1/7 .+ (1:5)) == 5
 end
 
 @testset "Bad range calls" begin
@@ -1899,6 +1922,40 @@ end
     @test typeof(step(StepRangeLen(Int8(1), Int8(2), 3, 2))) === Int8
 end
 
+@testset "LinRange eltype for element types that wrap integers" begin
+    struct RealWrapper{T <: Real} <: Real
+        x :: T
+    end
+    Base.promote_rule(::Type{S}, ::Type{RealWrapper{T}}) where {T,S<:Real} = RealWrapper{promote_type(S, T)}
+    Base.:(-)(w::RealWrapper) = RealWrapper(-w.x)
+    for f in [:(+), :(-), :(*), :(/)]
+        @eval Base.$f(w::RealWrapper, y::RealWrapper) = RealWrapper($f(w.x, y.x))
+    end
+    for f in [:(<), :(==), :(<=)]
+        @eval Base.$f(w::RealWrapper, y::RealWrapper) = $f(w.x, y.x)
+    end
+    for T in [:Float32, :Float64]
+        @eval Base.$T(w::RealWrapper) = $T(w.x)
+    end
+    (::Type{RealWrapper{T}})(w::RealWrapper) where {T<:Real} = RealWrapper{T}(T(w.x))
+    (::Type{T})(w::RealWrapper{T}) where {T<:Real} = T(w.x)
+    Base.:(==)(w::RealWrapper, y::RealWrapper) = w.x == y.x
+    Base.isfinite(w::RealWrapper) = isfinite(w.x)
+    Base.signbit(w::RealWrapper) = signbit(w.x)
+
+    x = RealWrapper(2)
+    r1 = range(x, stop = 2x, length = 10)
+    r2 = range(Int(x), stop = Int(2x), length = 10)
+    for i in eachindex(r1, r2)
+        @test r1[i] ≈ r2[i]
+    end
+    r3 = LinRange(x, 2x, 10)
+    r4 = LinRange(x, 2x, 10)
+    for i in eachindex(r3, r4)
+        @test r3[i] ≈ r4[i]
+    end
+end
+
 @testset "Bool indexing of ranges" begin
     @test_throws ArgumentError Base.OneTo(true)
     @test_throws ArgumentError Base.OneTo(true:true:true)
@@ -2112,3 +2169,40 @@ end
 @test length(range(1, 100, length=big(100)^100)) == big(100)^100
 @test length(range(big(1), big(100)^100, length=big(100)^100)) == big(100)^100
 @test length(0 * (1:big(100)^100)) == big(100)^100
+
+@testset "issue #41784" begin
+    # tests `in` when step equals 0
+    # test for Int
+    x = 41784
+    @test (x in StepRangeLen(x, 0, 0)) == false
+    @test (x in StepRangeLen(x, 0, rand(1:100))) == true
+    @test ((x - 1) in StepRangeLen(x, 0, rand(1:100))) == false
+    @test ((x + 1) in StepRangeLen(x, 0, rand(1:100))) == false
+
+    # test for Char
+    x = 'z'
+    @test (x in StepRangeLen(x, 0, 0)) == false
+    @test (x in StepRangeLen(x, 0, rand(1:100))) == true
+    @test ((x - 1) in StepRangeLen(x, 0, rand(1:100))) == false
+    @test ((x + 1) in StepRangeLen(x, 0, rand(1:100))) == false
+end
+
+@testset "issue #42528" begin
+    struct Fix42528 <: Unsigned
+        val::UInt
+    end
+    Fix42528(a::Fix42528) = a
+    Base.:(<)(a::Fix42528, b::Fix42528) = a.val < b.val
+    Base.:(>=)(a::Fix42528, b::Fix42528) = a.val >= b.val
+    Base.:(+)(a::Fix42528, b::Fix42528) = a.val+b.val
+    Base.promote_rule(::Type{Fix42528}, ::Type{<:Unsigned}) = Fix42528
+    Base.show(io::IO, ::MIME"text/plain", a::Fix42528) = print(io, "Fix42528(", a.val, ')')
+    Base.show(io::IO, a::Fix42528) = print(io, "Fix42528(", a.val, ')')
+    function Base.:(-)(a::Fix42528, b::Fix42528)
+        a.val < b.val && throw(DomainError("Can't subtract, result outside of domain"))
+        return a.val - b.val
+    end
+    Base.one(::Type{Fix42528}) = Fix42528(0x1)
+    @test Fix42528(0x0):Fix42528(0x1) == [Fix42528(0x0), Fix42528(0x01)]
+    @test_throws DomainError Fix42528(0x0) - Fix42528(0x1)
+end

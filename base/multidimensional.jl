@@ -357,8 +357,14 @@ module IteratorsMD
     @propagate_inbounds function Base.getindex(iter::CartesianIndices{0,R}) where {R}
         CartesianIndex()
     end
-    @propagate_inbounds function Base.getindex(iter::CartesianIndices{N,R}, I::Vararg{Int, N}) where {N,R}
-        CartesianIndex(getindex.(iter.indices, I))
+    @inline function Base.getindex(iter::CartesianIndices{N,R}, I::Vararg{Int, N}) where {N,R}
+        # Eagerly do boundscheck before calculating each item of the CartesianIndex so that
+        # we can pass `@inbounds` hint to inside the map and generates more efficient SIMD codes (#42115)
+        @boundscheck checkbounds(iter, I...)
+        index = map(iter.indices, I) do r, i
+            @inbounds getindex(r, i)
+        end
+        CartesianIndex(index)
     end
 
     # CartesianIndices act as a multidimensional range, so cartesian indexing of CartesianIndices
@@ -1121,6 +1127,25 @@ end
 
 Copy the block of `src` in the range of `Rsrc` to the block of `dest`
 in the range of `Rdest`. The sizes of the two regions must match.
+
+# Examples
+```jldoctest
+julia> A = zeros(5, 5);
+
+julia> B = [1 2; 3 4];
+
+julia> Ainds = CartesianIndices((2:3, 2:3));
+
+julia> Binds = CartesianIndices(B);
+
+julia> copyto!(A, Ainds, B, Binds)
+5×5 Matrix{Float64}:
+ 0.0  0.0  0.0  0.0  0.0
+ 0.0  1.0  2.0  0.0  0.0
+ 0.0  3.0  4.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0
+```
 """
 copyto!(::AbstractArray, ::CartesianIndices, ::AbstractArray, ::CartesianIndices)
 
@@ -1141,6 +1166,7 @@ See also [`circshift`](@ref).
     dest === src && throw(ArgumentError("dest and src must be separate arrays"))
     inds = axes(src)
     axes(dest) == inds || throw(ArgumentError("indices of src and dest must match (got $inds and $(axes(dest)))"))
+    isempty(src) && return dest
     _circshift!(dest, (), src, (), inds, fill_to_length(shiftamt, 0, Val(N)))
 end
 
@@ -1551,13 +1577,12 @@ for (V, PT, BT) in Any[((:N,), BitArray, BitArray), ((:T,:N), Array, StridedArra
             #Creates offset, because indexing starts at 1
             offset = 1 - sum(@ntuple $N d->strides_{d+1})
 
+            sumc = 0
             ind = 1
-            @nexprs 1 d->(counts_{$N+1} = strides_{$N+1}) # a trick to set counts_($N+1)
             @nloops($N, i, P,
-                    d->(counts_d = strides_d), # PRE
-                    d->(counts_{d+1} += strides_{d+1}), # POST
+                    d->(sumc += i_d*strides_{d+1}), # PRE
+                    d->(sumc -= i_d*strides_{d+1}), # POST
                     begin # BODY
-                        sumc = sum(@ntuple $N d->counts_{d+1})
                         @inbounds P[ind] = B[sumc+offset]
                         ind += 1
                     end)

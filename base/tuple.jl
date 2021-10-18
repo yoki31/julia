@@ -354,12 +354,29 @@ _totuple(::Type{Tuple}, itr::NamedTuple) = (itr...,)
 
 end
 
+## find ##
+
+_findfirst_rec(f, i::Int, ::Tuple{}) = nothing
+_findfirst_rec(f, i::Int, t::Tuple) = (@inline; f(first(t)) ? i : _findfirst_rec(f, i+1, tail(t)))
+function _findfirst_loop(f::Function, t)
+    for i in 1:length(t)
+        f(t[i]) && return i
+    end
+    return nothing
+end
+findfirst(f::Function, t::Tuple) = length(t) < 32 ? _findfirst_rec(f, 1, t) : _findfirst_loop(f, t)
+
+function findlast(f::Function, x::Tuple)
+    r = findfirst(f, reverse(x))
+    return isnothing(r) ? r : length(x) - r + 1
+end
+
 ## filter ##
 
-filter(f, xs::Tuple) = afoldl((ys, x) -> f(x) ? (ys..., x) : ys, (), xs...)
+filter_rec(f, xs::Tuple) = afoldl((ys, x) -> f(x) ? (ys..., x) : ys, (), xs...)
 
 # use Array for long tuples
-filter(f, t::Any32) = Tuple(filter(f, collect(t)))
+filter(f, t::Tuple) = length(t) < 32 ? filter_rec(f, t) : Tuple(filter(f, collect(t)))
 
 ## comparison ##
 
@@ -488,17 +505,12 @@ reverse(t::Tuple) = revargs(t...)
 
 ## specialized reduction ##
 
-# TODO: these definitions cannot yet be combined, since +(x...)
-# where x might be any tuple matches too many methods.
-# TODO: this is inconsistent with the regular sum in cases where the arguments
-# require size promotion to system size.
-sum(x::Tuple{Any, Vararg{Any}}) = +(x...)
-
-# NOTE: should remove, but often used on array sizes
-# TODO: this is inconsistent with the regular prod in cases where the arguments
-# require size promotion to system size.
 prod(x::Tuple{}) = 1
-prod(x::Tuple{Any, Vararg{Any}}) = *(x...)
+# This is consistent with the regular prod because there is no need for size promotion
+# if all elements in the tuple are of system size.
+# It is defined here separately in order to support bootstrap, because it's needed earlier
+# than the general prod definition is available.
+prod(x::Tuple{Int, Vararg{Int}}) = *(x...)
 
 all(x::Tuple{}) = true
 all(x::Tuple{Bool}) = x[1]

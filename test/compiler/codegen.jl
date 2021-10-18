@@ -594,6 +594,14 @@ f41438(y) = y[].x
 @test f41438(Ref{A41438}(A41438(C_NULL))) === C_NULL
 @test f41438(Ref{B41438}(B41438(C_NULL))) === C_NULL
 
+const S41438 = Pair{Any, Ptr{T}} where T
+g41438() = Array{S41438,1}(undef,1)[1].first
+get_llvm(g41438, ()); # cause allocation of layout
+@test S41438.body.layout != C_NULL
+@test !Base.datatype_pointerfree(S41438.body)
+@test S41438{Int}.layout != C_NULL
+@test !Base.datatype_pointerfree(S41438{Int})
+
 # issue #41157
 f41157(a, b) = a[1] = b[1]
 @test_throws BoundsError f41157(Tuple{Int}[], Tuple{Union{}}[])
@@ -629,3 +637,10 @@ t41096 = Term41096{:t}(Modulate41096(:t, false))
 U41096 = Term41096{:U}(Modulate41096(:U, false))
 
 @test !newexpand41096((t=t41096, μ=μ41096, U=U41096), :U)
+
+# test that we can start julia with libjulia-codegen removed; PR #41936
+mktempdir() do pfx
+    run(`cp -r $(Sys.BINDIR)/.. $pfx`)
+    run(`rm -rf $pfx/lib/julia/libjulia-codegen\*`)
+    @test readchomp(`$pfx/bin/$(Base.julia_exename()) -e 'println("no codegen!")'`) == "no codegen!"
+end
