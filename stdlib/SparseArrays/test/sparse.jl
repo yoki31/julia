@@ -3316,4 +3316,11 @@ using Base: swaprows!, swapcols!
     end
 end
 
+@testset "sparse BigInt det" begin
+    # These matrices are dense, but we're just trying to exercise the bareiss factorization
+    # path for sparse matrices here
+    @test det(sparse(BigInt[9 1 8 0; 0 0 8 7; 7 6 8 3; 2 9 7 7]))::BigInt == -1
+    @test det(sparse(BigInt[1 big(2)^65+1; 3 4]))::BigInt == (4 - 3*(big(2)^65+1))
+end
+
 end # module
