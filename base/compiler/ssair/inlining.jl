@@ -55,10 +55,10 @@ struct ConstantCase
 end
 
 struct InliningCase
-    sig  # ::Type
+    sig::DataType
     item # Union{InliningTodo, MethodInstance, ConstantCase}
-    function InliningCase(@nospecialize(sig), @nospecialize(item))
-        @assert isa(item, Union{InliningTodo, MethodInstance, ConstantCase}) "invalid inlining item"
+    function InliningCase(sig::DataType, @nospecialize(item))
+        @assert isa(item, Union{InliningTodo, MethodInstance, ConstantCase, Nothing}) "invalid inlining item"
         return new(sig, item)
     end
 end
@@ -461,12 +461,15 @@ function ir_inline_unionsplit!(compact::IncrementalCompact, idx::Int,
     pn = PhiNode()
     local bb = compact.active_result_bb
     @assert length(bbs) > length(cases)
+    # we may deal with union-split, abstract callsites here,
+    # and so we sort all inlining candidates by signature speciality
+    # so that the generated `isa` checks simulates the dispatch semantics
+    sort!(cases; lt=morespecific, by=case::InliningCase->case.sig)
     for i in 1:length(cases)
         ithcase = cases[i]
         metharg = ithcase.sig
         case = ithcase.item
         next_cond_bb = bbs[i]
-        @assert !isa(metharg, UnionAll)
         cond = true
         aparams, mparams = atype.parameters::SimpleVector, metharg.parameters::SimpleVector
         @assert length(aparams) == length(mparams)
@@ -501,6 +504,9 @@ function ir_inline_unionsplit!(compact::IncrementalCompact, idx::Int,
         end
         if isa(case, InliningTodo)
             val = ir_inline_item!(compact, idx, argexprs′, linetable, case, boundscheck, todo_bbs)
+        elseif case === nothing
+            val = insert_node_here!(compact,
+                NewInstruction(Expr(:call, argexprs′...), typ, line))
         elseif isa(case, MethodInstance)
             val = insert_node_here!(compact,
                 NewInstruction(Expr(:invoke, case, argexprs′...), typ, line))
@@ -1153,9 +1159,7 @@ function analyze_single_call!(
     (; atypes, atype)::Signature, infos::Vector{MethodMatchInfo}, state::InliningState, flag::UInt8)
     cases = InliningCase[]
     local signature_union = Bottom
-    local only_method = nothing  # keep track of whether there is one matching method
-    local meth
-    local fully_covered = true
+    local allseen = true
     for i in 1:length(infos)
         info = infos[i]
         meth = info.results
@@ -1166,54 +1170,21 @@ function analyze_single_call!(
         elseif length(meth) == 0
             # No applicable methods; try next union split
             continue
-        elseif length(meth) == 1 && only_method !== false
-            if only_method === nothing
-                only_method = meth[1].method
-            elseif only_method !== meth[1].method
-                only_method = false
-            end
-        else
-            only_method = false
         end
         for match in meth
             spec_types = match.spec_types
             signature_union = Union{signature_union, spec_types}
-            if !isdispatchtuple(spec_types)
-                fully_covered = false
+            if !isa(spec_types, DataType)
+                allseen = false
                 continue
             end
             item = analyze_method!(match, atypes, state, flag)
-            if item === nothing
-                fully_covered = false
-                continue
-            elseif _any(case->case.sig === spec_types, cases)
-                continue
-            end
             push!(cases, InliningCase(spec_types, item))
         end
     end
-
-    # if the signature is fully covered and there is only one applicable method,
-    # we can try to inline it even if the signature is not a dispatch tuple
-    if atype <: signature_union
-        if length(cases) == 0 && only_method isa Method
-            if length(infos) > 1
-                (metharg, methsp) = ccall(:jl_type_intersection_with_env, Any, (Any, Any),
-                    atype, only_method.sig)::SimpleVector
-                match = MethodMatch(metharg, methsp, only_method, true)
-            else
-                meth = meth::MethodLookupResult
-                @assert length(meth) == 1
-                match = meth[1]
-            end
-            item = analyze_method!(match, atypes, state, flag)
-            item === nothing && return
-            push!(cases, InliningCase(match.spec_types, item))
-            fully_covered = true
-        end
-    else
-        fully_covered = false
-    end
+    # if we've not seen all candidates, union split is valid only for dispatch tuples
+    allseen || filter!(case::InliningCase->isdispatchtuple(case.sig), cases)
+    fully_covered = allseen & (atype <: signature_union)
 
     # If we only have one case and that case is fully covered, we may either
     # be able to do the inlining now (for constant cases), or push it directly
@@ -1234,43 +1205,27 @@ function maybe_handle_const_call!(
     ir::IRCode, idx::Int, stmt::Expr, (; results)::ConstCallInfo, (; atypes, atype)::Signature,
     state::InliningState, flag::UInt8, isinvoke::Bool, todo::Vector{Pair{Int, Any}})
     cases = InliningCase[] # TODO avoid this allocation for single cases ?
-    local fully_covered = true
+    local allseen = true
     local signature_union = Bottom
     for result in results
         isa(result, InferenceResult) || return false
         (; mi) = item = InliningTodo(result, atypes)
         spec_types = mi.specTypes
         signature_union = Union{signature_union, spec_types}
-        if !isdispatchtuple(spec_types)
-            fully_covered = false
+        if !isa(spec_types, DataType)
+            allseen = false
             continue
         end
-        if !validate_sparams(mi.sparam_vals)
-            fully_covered = false
-            continue
-        end
-        state.mi_cache !== nothing && (item = resolve_todo(item, state, flag))
-        if item === nothing
-            fully_covered = false
-            continue
+        if validate_sparams(mi.sparam_vals)
+            state.mi_cache !== nothing && (item = resolve_todo(item, state, flag))
+        else
+            item = nothing
         end
         push!(cases, InliningCase(spec_types, item))
     end
-
-    # if the signature is fully covered and there is only one applicable method,
-    # we can try to inline it even if the signature is not a dispatch tuple
-    if atype <: signature_union
-        if length(cases) == 0 && length(results) == 1
-            (; mi) = item = InliningTodo(results[1]::InferenceResult, atypes)
-            state.mi_cache !== nothing && (item = resolve_todo(item, state, flag))
-            validate_sparams(mi.sparam_vals) || return true
-            item === nothing && return true
-            push!(cases, InliningCase(mi.specTypes, item))
-            fully_covered = true
-        end
-    else
-        fully_covered = false
-    end
+    # if we've not seen all candidates, union split is valid only for dispatch tuples
+    allseen || filter!(case::InliningCase->isdispatchtuple(case.sig), cases)
+    fully_covered = allseen & (atype <: signature_union)
 
     # If we only have one case and that case is fully covered, we may either
     # be able to do the inlining now (for constant cases), or push it directly
