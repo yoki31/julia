@@ -135,6 +135,33 @@ rest(t::Tuple, i::Int) = ntuple(x -> getfield(t, x+i-1), length(t)-i+1)
 rest(a::Array, i::Int=1) = a[i:end]
 rest(itr, state...) = Iterators.rest(itr, state...)
 
+_collect_n(itr, ::Val{0}, st...) = ((), st)
+function _collect_n(itr, ::Val{N}, st...) where {N}
+    tmp = iterate(itr, st...)
+    if tmp === nothing
+        error("Iterator does not contain enough elements for the given variables.")
+    end
+    first, st′ = tmp
+    tail, st′′ = _collect_n(itr, Val(N-1), st′)
+    return (first, tail...), st′′
+end
+
+function split_rest(itr, ::Val{N}, st...) where {N}
+    if IteratorSize(itr) == IsInfinite()
+        error("Can't split an infinite iterator in the middle.")
+    end
+    last_n, st′ = _collect_n(itr, Val(N), st...)
+    front = Vector{eltype(itr)}()
+    while true
+        tmp = iterate(itr, st′...)
+        tmp === nothing && break
+        xᵢ, st′ = tmp
+        push!(front, first(last_n))
+        last_n = (tail(last_n)..., xᵢ)
+    end
+    return front, last_n
+end
+
 # Use dispatch to avoid a branch in first
 first(::Tuple{}) = throw(ArgumentError("tuple must be non-empty"))
 first(t::Tuple) = t[1]

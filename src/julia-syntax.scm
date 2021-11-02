@@ -2152,22 +2152,17 @@
        (tuple-to-assignments lhss x))
       ;; (a, b, ...) = other
       (begin
-        ;; like memq, but if last element of lhss is (... sym),
-        ;; check against sym instead
+        ;; like memq, but if lhs is (... sym), check against sym instead
         (define (in-lhs? x lhss)
           (if (null? lhss)
               #f
               (let ((l (car lhss)))
                 (cond ((and (pair? l) (eq? (car l) '|...|))
-                       (if (null? (cdr lhss))
-                           (eq? (cadr l) x)
-                           (error (string "invalid \"...\" on non-final assignment location \""
-                                          (cadr l) "\""))))
+                       (eq? (cadr l) x))
                       ((eq? l x) #t)
                       (else (in-lhs? x (cdr lhss)))))))
-        ;; in-lhs? also checks for invalid syntax, so always call it first
-        (let* ((xx  (cond ((or (and (not (in-lhs? x lhss)) (symbol? x))
-                               (ssavalue? x))
+        (let* ((xx  (cond ((or (ssavalue? x)
+                               (and (symbol? x) (not (in-lhs? x lhss))))
                             x)
                           ((and (pair? lhss) (vararg? (last lhss))
                                 (eventually-call? (cadr (last lhss))))
@@ -2184,37 +2179,52 @@
                         n))
                (st  (gensy))
                (end '()))
+          (define (destructure i lhss xx)
+            (if (null? lhss)
+                '()
+                (let* ((lhs  (car lhss))
+                       (lhs- (cond ((or (symbol? lhs) (ssavalue? lhs))
+                                    lhs)
+                                   ((vararg? lhs)
+                                    (let ((lhs- (cadr lhs)))
+                                      (if (or (symbol? lhs-) (ssavalue? lhs-))
+                                          lhs
+                                          `(|...| ,(if (eventually-call? lhs-)
+                                                       (gensy)
+                                                       (make-ssavalue))))))
+                                   ;; can't use ssavalues if it's a function definition
+                                   ((eventually-call? lhs) (gensy))
+                                   (else (make-ssavalue)))))
+                  (if (and (vararg? lhs) (any vararg? (cdr lhss)))
+                      (error "multiple \"...\" on lhs of assignment"))
+                  (if (not (eq? lhs lhs-))
+                      (if (vararg? lhs)
+                          (set! end (cons (expand-forms `(= ,(cadr lhs) ,(cadr lhs-))) end))
+                          (set! end (cons (expand-forms `(= ,lhs ,lhs-)) end))))
+                  (if (vararg? lhs-)
+                      (if (= i n)
+                          (cons (expand-forms
+                                  `(= ,(cadr lhs-) (call (top rest) ,xx ,@(if (eq? i 1) '() `(,st)))))
+                                (destructure (+ i 1) (cdr lhss) xx))
+                          (let ((tail (if (eventually-call? lhs) (gensy) (make-ssavalue))))
+                            (cons (expand-forms
+                                    (lower-tuple-assignment
+                                      (list (cadr lhs-) tail)
+                                      `(call (top split_rest) ,xx (call (top Val) ,(- n i))
+                                             ,@(if (eq? i 1) '() `(,st)))))
+                                  (destructure 1 (cdr lhss) tail))))
+                      (cons (expand-forms
+                              (lower-tuple-assignment
+                                (if (= i n)
+                                    (list lhs-)
+                                    (list lhs- st))
+                                `(call (top indexed_iterate)
+                                       ,xx ,i ,@(if (eq? i 1) '() `(,st)))))
+                            (destructure (+ i 1) (cdr lhss) xx))))))
           `(block
             ,@(if (> n 0) `((local ,st)) '())
             ,@ini
-            ,@(map (lambda (i lhs)
-                     (let ((lhs- (cond ((or (symbol? lhs) (ssavalue? lhs))
-                                        lhs)
-                                       ((vararg? lhs)
-                                        (let ((lhs- (cadr lhs)))
-                                          (if (or (symbol? lhs-) (ssavalue? lhs-))
-                                              lhs
-                                              `(|...| ,(if (eventually-call? lhs-)
-                                                           (gensy)
-                                                           (make-ssavalue))))))
-                                       ;; can't use ssavalues if it's a function definition
-                                       ((eventually-call? lhs) (gensy))
-                                       (else (make-ssavalue)))))
-                       (if (not (eq? lhs lhs-))
-                           (if (vararg? lhs)
-                               (set! end (cons (expand-forms `(= ,(cadr lhs) ,(cadr lhs-))) end))
-                               (set! end (cons (expand-forms `(= ,lhs ,lhs-)) end))))
-                       (expand-forms
-                         (if (vararg? lhs-)
-                             `(= ,(cadr lhs-) (call (top rest) ,xx ,@(if (eq? i 0) '() `(,st))))
-                             (lower-tuple-assignment
-                               (if (= i (- n 1))
-                                   (list lhs-)
-                                   (list lhs- st))
-                               `(call (top indexed_iterate)
-                                      ,xx ,(+ i 1) ,@(if (eq? i 0) '() `(,st))))))))
-                   (iota n)
-                   lhss)
+            ,@(destructure 1 lhss xx)
             ,@(reverse end)
             (unnecessary ,xx))))))
 
