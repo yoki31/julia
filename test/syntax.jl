@@ -2608,8 +2608,6 @@ end
     @test x == 1 && y == 2
     @test z == (3:5,)
 
-    @test Meta.isexpr(Meta.@lower(begin a, b..., c = 1:3 end), :error)
-    @test Meta.isexpr(Meta.@lower(begin a, b..., c = 1, 2, 3 end), :error)
     @test Meta.isexpr(Meta.@lower(begin a, b..., c... = 1, 2, 3 end), :error)
 
     @test_throws BoundsError begin x, y, z... = 1:1 end
