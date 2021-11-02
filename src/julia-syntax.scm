@@ -1468,8 +1468,7 @@
                                ,@(reverse after)
                                (= ,(cadr L) ,temp)
                                (unnecessary (tuple ,@(reverse elts) (... ,temp)))))
-                     (let ((temp (if (eventually-call? (cadr L)) (gensy) (make-ssavalue)))
-                           (lhss- (reverse lhss))
+                     (let ((lhss- (reverse lhss))
                            (rhss- (reverse rhss))
                            (lhs-tail '())
                            (rhs-tail '()))
@@ -1483,7 +1482,13 @@
                                (set! rhss- (cdr rhss-))
                                (extract-tail))))
                        (extract-tail)
-                       (let* ((assigns (make-assignment temp `(tuple ,@(reverse rhss-))))
+                       (let* ((temp (if (any (lambda (x)
+                                               (or (eventually-call? x)
+                                                   (and (vararg? x) (eventually-call? (cadr x)))))
+                                             lhss-)
+                                        (gensy)
+                                        (make-ssavalue)))
+                              (assigns (make-assignment temp `(tuple ,@(reverse rhss-))))
                               (assigns (if (symbol? temp)
                                           `(,assigns (local-def ,temp))
                                           (list assigns)))
@@ -1492,7 +1497,7 @@
                               (assigns (if (and (length= lhss- 1) (vararg? (car lhss-)))
                                            (begin
                                              (set! after
-                                                   (cons (make-assignment (cadar lhss-) temp) after))
+                                                   (cons `(= ,(cadar lhss-) ,temp) after))
                                              assigns)
                                            (append (if (> n 0)
                                                        `(,@assigns (local ,st))
@@ -2198,7 +2203,7 @@
                 (set! end (cons (expand-forms `(= ,lhs ,lhs-)) end))))
         (if (vararg? lhs-)
             (if (= i n)
-                (if (underscore-symbol? (car lhs-))
+                (if (underscore-symbol? (cadr lhs-))
                     '()
                     (list (expand-forms
                             `(= ,(cadr lhs-) (call (top rest) ,xx ,@(if (eq? i 1) '() `(,st)))))))
@@ -2208,7 +2213,7 @@
                             (list (cadr lhs-) tail)
                             `(call (top split_rest) ,xx (call (top Val) ,(- n i))
                                    ,@(if (eq? i 1) '() `(,st)))))
-                        (destructure- 1 (cdr lhss) tail n st end))))
+                        (destructure- 1 (cdr lhss) tail (- n i) st end))))
             (cons (expand-forms
                     (lower-tuple-assignment
                       (if (= i n)
