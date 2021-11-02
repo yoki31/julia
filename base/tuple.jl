@@ -135,7 +135,8 @@ rest(t::Tuple, i::Int) = ntuple(x -> getfield(t, x+i-1), length(t)-i+1)
 rest(a::Array, i::Int=1) = a[i:end]
 rest(itr, state...) = Iterators.rest(itr, state...)
 
-_collect_n(itr, ::Val{0}, st...) = ((), st)
+_collect_n(itr, ::Val{0}) = error()
+_collect_n(itr, ::Val{0}, st) = ((), st)
 function _collect_n(itr, ::Val{N}, st...) where {N}
     tmp = iterate(itr, st...)
     if tmp === nothing
@@ -153,7 +154,7 @@ function split_rest(itr, ::Val{N}, st...) where {N}
     last_n, st′ = _collect_n(itr, Val(N), st...)
     front = Vector{eltype(itr)}()
     while true
-        tmp = iterate(itr, st′...)
+        tmp = iterate(itr, st′)
         tmp === nothing && break
         xᵢ, st′ = tmp
         push!(front, first(last_n))
