@@ -1494,6 +1494,7 @@
                                           (list assigns)))
                               (n (length lhss-))
                               (st (gensy))
+                              (end (list after))
                               (assigns (if (and (length= lhss- 1) (vararg? (car lhss-)))
                                            (begin
                                              (set! after
@@ -1503,12 +1504,12 @@
                                                        `(,@assigns (local ,st))
                                                        assigns)
                                                    (destructure- 1 (reverse lhss-) temp
-                                                                 n st after)))))
+                                                                 n st end)))))
                          (loop (reverse lhs-tail)
                                (append (map (lambda (x) (if (vararg? x) (cadr x) x)) lhss-) assigned)
                                (reverse rhs-tail)
                                (append (reverse assigns) stmts)
-                               after
+                               (car end)
                                (cons `(... ,temp) elts))))))
 
                 ((vararg? R)
@@ -2199,8 +2200,8 @@
             (error "multiple \"...\" on lhs of assignment"))
         (if (not (eq? lhs lhs-))
             (if (vararg? lhs)
-                (set! end (cons (expand-forms `(= ,(cadr lhs) ,(cadr lhs-))) end))
-                (set! end (cons (expand-forms `(= ,lhs ,lhs-)) end))))
+                (set-car! end (cons (expand-forms `(= ,(cadr lhs) ,(cadr lhs-))) (car end)))
+                (set-car! end (cons (expand-forms `(= ,lhs ,lhs-)) (car end)))))
         (if (vararg? lhs-)
             (if (= i n)
                 (if (underscore-symbol? (cadr lhs-))
@@ -2258,12 +2259,12 @@
                (ini (if (eq? x xx) '() (list (sink-assignment xx (expand-forms x)))))
                (n   (length lhss))
                (st  (gensy))
-               (end '()))
+               (end (list (list))))
           `(block
             ,@(if (> n 0) `((local ,st)) '())
             ,@ini
             ,@(destructure- 1 lhss xx n st end)
-            ,@(reverse end)
+            ,@(reverse (car end))
             (unnecessary ,xx))))))
 
 ;; move an assignment into the last statement of a block to keep more statements at top level
