@@ -1490,24 +1490,24 @@
                                         (make-ssavalue)))
                               (assigns (make-assignment temp `(tuple ,@(reverse rhss-))))
                               (assigns (if (symbol? temp)
-                                          `(,assigns (local-def ,temp))
+                                          `((local-def ,temp) ,assigns)
                                           (list assigns)))
                               (n (length lhss-))
                               (st (gensy))
                               (end (list after))
                               (assigns (if (and (length= lhss- 1) (vararg? (car lhss-)))
                                            (begin
-                                             (set! after
-                                                   (cons `(= ,(cadar lhss-) ,temp) after))
+                                             (set-car! end
+                                                       (cons `(= ,(cadar lhss-) ,temp) (car end)))
                                              assigns)
                                            (append (if (> n 0)
                                                        `(,@assigns (local ,st))
                                                        assigns)
                                                    (destructure- 1 (reverse lhss-) temp
                                                                  n st end)))))
-                         (loop (reverse lhs-tail)
+                         (loop lhs-tail
                                (append (map (lambda (x) (if (vararg? x) (cadr x) x)) lhss-) assigned)
-                               (reverse rhs-tail)
+                               rhs-tail
                                (append (reverse assigns) stmts)
                                (car end)
                                (cons `(... ,temp) elts))))))
