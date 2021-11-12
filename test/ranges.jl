@@ -1894,41 +1894,50 @@ end
 end
 
 @testset "eltype of range(::Integer; step::Rational, length) (#37295)" begin
-    @test range(1, step=1//2, length=3) == [1//1, 3//2, 2//1]
-    @test eltype(range(1, step=1//2, length=3)) === Rational{Int}
-    @test typeof(step(range(1, step=1//2, length=3))) === Rational{Int}
+    r = range(1, step=1//2, length=3)
+    @test r == [1//1, 3//2, 2//1]
+    @test eltype(r) === Rational{Int}
+    @test typeof(step(r)) === Rational{Int}
 
-    @test range(1//1, step=2, length=3) == [1, 3, 5]
-    @test eltype(range(1//1, step=2, length=3)) === Rational{Int}
-    @test typeof(step(range(1//1, step=2, length=3))) === Int
+    r = range(1//1, step=2, length=3)
+    @test r == [1, 3, 5]
+    @test eltype(r) === Rational{Int}
+    @test typeof(step(r)) === Int
 
-    @test range(Int16(1), step=Rational{Int8}(1,2), length=3) == [1//1, 3//2, 2//1]
-    @test eltype(range(Int16(1), step=Rational{Int8}(1,2), length=3)) === Rational{Int16}
-    @test typeof(step(range(Int16(1), step=Rational{Int8}(1,2), length=3))) === Rational{Int8}
+    r = range(Int16(1), step=Rational{Int8}(1,2), length=Int16(3))
+    @test r == [1//1, 3//2, 2//1]
+    @test eltype(r) === Rational{Int16}
+    @test typeof(step(r)) === Rational{Int8}
 
-    @test range(Rational{Int8}(1), step=Int16(2), length=3) == [1, 3, 5]
-    @test eltype(range(Rational{Int8}(1), step=Int16(2), length=3)) === Rational{Int16}
-    @test typeof(step(range(Rational{Int8}(1), step=Int16(2), length=3))) === Int16
+    r = range(Rational{Int8}(1), step=Int16(2), length=Int8(3))
+    @test r == [1, 3, 5]
+    @test eltype(r) === Rational{Int16}
+    @test typeof(step(r)) === Int16
 
-    @test range('a', step=2, length=3) == ['a', 'c', 'e']
-    @test eltype(range('a', step=2, length=3)) === Char
-    @test typeof(step(range('a', step=2, length=3))) === Int
+    r = range('a', step=2, length=3)
+    @test r == ['a', 'c', 'e']
+    @test eltype(r) === Char
+    @test typeof(step(r)) === Int
 
-    @test isempty(range(typemax(Int)//1, step=1, length=0))
-    @test eltype(range(typemax(Int)//1, step=1, length=0)) === Rational{Int}
-    @test typeof(step(range(typemax(Int)//1, step=1, length=0))) === Int
+    r = range(typemax(Int)//1, step=1, length=0)
+    @test isempty(r)
+    @test eltype(r) === Rational{Int}
+    @test typeof(step(r)) === Int
 
-    @test isempty(range(typemin(Int), step=-1//1, length=0))
-    @test eltype(range(typemin(Int), step=-1//1, length=0)) === Rational{Int}
-    @test typeof(step(range(typemin(Int), step=-1//1, length=0))) === Rational{Int}
+    r = range(typemin(Int), step=-1//1, length=0)
+    @test isempty(r)
+    @test eltype(r) === Rational{Int}
+    @test typeof(step(r)) === Rational{Int}
 
-    @test StepRangeLen(Int8(1), Int8(2), 3) == Int8[1, 3, 5]
-    @test eltype(StepRangeLen(Int8(1), Int8(2), 3)) === Int8
-    @test typeof(step(StepRangeLen(Int8(1), Int8(2), 3))) === Int8
+    r = StepRangeLen(Int8(1), Int8(2), 3)
+    @test r == Int8[1, 3, 5]
+    @test eltype(r) === Int8
+    @test typeof(step(r)) === Int8
 
-    @test StepRangeLen(Int8(1), Int8(2), 3, 2) == Int8[-1, 1, 3]
-    @test eltype(StepRangeLen(Int8(1), Int8(2), 3, 2)) === Int8
-    @test typeof(step(StepRangeLen(Int8(1), Int8(2), 3, 2))) === Int8
+    r = StepRangeLen(Int8(1), Int8(2), 3, 2)
+    @test r == Int8[-1, 1, 3]
+    @test eltype(r) === Int8
+    @test typeof(step(r)) === Int8
 end
 
 @testset "LinRange eltype for element types that wrap integers" begin
@@ -2226,3 +2235,19 @@ let r = Ptr{Cvoid}(20):-UInt(2):Ptr{Cvoid}(10)
     @test step(r) === -UInt(2)
     @test last(r) === Ptr{Cvoid}(10)
 end
+
+# test behavior of wrap-around and promotion of empty ranges (#35711)
+@test length(range(0, length=UInt(0))) === UInt(0)
+@test !isempty(range(0, length=UInt(0)))
+@test length(range(typemax(Int), length=UInt(0))) === UInt(0)
+@test isempty(range(typemax(Int), length=UInt(0)))
+@test length(range(0, length=UInt(0), step=UInt(2))) == typemin(Int) % UInt
+@test !isempty(range(0, length=UInt(0), step=UInt(2)))
+@test length(range(typemax(Int), length=UInt(0), step=UInt(2))) === UInt(0)
+@test isempty(range(typemax(Int), length=UInt(0), step=UInt(2)))
+@test length(range(typemax(Int), length=UInt(0), step=2)) === UInt(0)
+@test isempty(range(typemax(Int), length=UInt(0), step=2))
+@test length(range(typemax(Int), length=0, step=UInt(2))) === UInt(0)
+@test isempty(range(typemax(Int), length=0, step=UInt(2)))
+
+@test length(range(1, length=typemax(Int128))) === typemax(Int128)
