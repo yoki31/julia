@@ -14,6 +14,7 @@ See also [Multi-Threading](@ref man-multithreading).
 ```@docs
 Base.Threads.Condition
 Base.Threads.Event
+Base.reset(::Base.Threads.Event)
 ```
 
 See also [Synchronization](@ref lib-task-sync).
