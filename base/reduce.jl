@@ -304,7 +304,7 @@ pairwise_blocksize(::typeof(abs2), ::typeof(+)) = 4096
 
 # handling empty arrays
 _empty_reduce_error() = throw(ArgumentError("reducing over an empty collection is not allowed"))
-_empty_reduce_error(@nospecialize(f), @nospecialize(T::Type)) = throw(ArgumentError("""
+_empty_reduce_error(@nospecialize(f), @nospecialize(T#=::Type=#)) = throw(ArgumentError("""
     reducing with $f over an empty collection of element type $T is not allowed.
     You may be able to prevent this error by supplying an `init` value to the reducer."""))
 

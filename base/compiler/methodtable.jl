@@ -61,7 +61,7 @@ given signature `sig`. If no applicable methods are found, an empty result is
 returned. If the number of applicable methods exceeded the specified limit,
 `missing` is returned.
 """
-function findall(@nospecialize(sig::Type), table::InternalMethodTable; limit::Int=typemax(Int))
+function findall(@nospecialize(sig#=::Type=#), table::InternalMethodTable; limit::Int=typemax(Int))
     _min_val = RefValue{UInt}(typemin(UInt))
     _max_val = RefValue{UInt}(typemax(UInt))
     _ambig = RefValue{Int32}(0)
@@ -72,7 +72,7 @@ function findall(@nospecialize(sig::Type), table::InternalMethodTable; limit::In
     return MethodLookupResult(ms::Vector{Any}, WorldRange(_min_val[], _max_val[]), _ambig[] != 0)
 end
 
-function findall(@nospecialize(sig::Type), table::OverlayMethodTable; limit::Int=typemax(Int))
+function findall(@nospecialize(sig#=::Type=#), table::OverlayMethodTable; limit::Int=typemax(Int))
     _min_val = RefValue{UInt}(typemin(UInt))
     _max_val = RefValue{UInt}(typemax(UInt))
     _ambig = RefValue{Int32}(0)
@@ -91,7 +91,7 @@ function findall(@nospecialize(sig::Type), table::OverlayMethodTable; limit::Int
     return MethodLookupResult(ms::Vector{Any}, WorldRange(_min_val[], _max_val[]), _ambig[] != 0)
 end
 
-function findall(@nospecialize(sig::Type), table::CachedMethodTable; limit::Int=typemax(Int))
+function findall(@nospecialize(sig#=::Type=#), table::CachedMethodTable; limit::Int=typemax(Int))
     box = Core.Box(sig)
     return get!(table.cache, sig) do
         findall(box.contents, table.table; limit=limit)
@@ -112,7 +112,7 @@ Such a method `m` need not exist. It is possible that no method is an
 upper bound of `sig`, or it is possible that among the upper bounds, there
 is no least element. In both cases `nothing` is returned.
 """
-function findsup(@nospecialize(sig::Type), table::InternalMethodTable)
+function findsup(@nospecialize(sig#=::Type=#), table::InternalMethodTable)
     min_valid = RefValue{UInt}(typemin(UInt))
     max_valid = RefValue{UInt}(typemax(UInt))
     result = ccall(:jl_gf_invoke_lookup_worlds, Any, (Any, UInt, Ptr{Csize_t}, Ptr{Csize_t}),
@@ -122,4 +122,4 @@ function findsup(@nospecialize(sig::Type), table::InternalMethodTable)
 end
 
 # This query is not cached
-findsup(@nospecialize(sig::Type), table::CachedMethodTable) = findsup(sig, table.table)
+findsup(@nospecialize(sig#=::Type=#), table::CachedMethodTable) = findsup(sig, table.table)

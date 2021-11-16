@@ -304,13 +304,13 @@ struct TypeError <: Exception
     # that got a bad value.
     func::Symbol
     context::Union{AbstractString,Symbol}
-    expected::Type
+    expected #Type
     got
-    TypeError(func, context, @nospecialize(expected::Type), @nospecialize(got)) =
+    TypeError(func, context, @nospecialize(expected), @nospecialize(got)) =
         new(func, context, expected, got)
 end
-TypeError(where, @nospecialize(expected::Type), @nospecialize(got)) =
-    TypeError(Symbol(where), "", expected, got)
+TypeError(context, @nospecialize(expected), @nospecialize(got)) =
+    TypeError(Symbol(context), "", expected, got)
 struct InexactError <: Exception
     func::Symbol
     T  # Type
